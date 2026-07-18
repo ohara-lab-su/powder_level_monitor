@@ -1,17 +1,18 @@
-from __future__ import annotations
+#!/usr/bin/env python
+#from __future__ import annotations
 
-from ese774_frame.api_spec import ApiSpec
+from ese774_frame.models.api_spec import  ApiSpec
 
-from src.server_fastapi.api_models import BaselineRequest
-from src.server_fastapi.api_models import BaselineResponse
-from src.server_fastapi.api_models import BoolResponse
-from src.server_fastapi.api_models import DetectorParamsRequest
-from src.server_fastapi.api_models import DetectorParamsResponse
-from src.server_fastapi.api_models import MeasurementResponse
-from src.server_fastapi.api_models import MeasurementUpdateRequest
-from src.server_fastapi.api_models import RoiPointsRequest
-from src.server_fastapi.api_models import RoiPointsResponse
-from src.server_fastapi.api_models import StatusResponse
+from power_level_monitor.server_fastapi.api_models import BaselineRequest
+from power_level_monitor.server_fastapi.api_models import BaselineResponse
+from power_level_monitor.server_fastapi.api_models import BoolResponse
+from power_level_monitor.server_fastapi.api_models import DetectorParamsRequest
+from power_level_monitor.server_fastapi.api_models import DetectorParamsResponse
+from power_level_monitor.server_fastapi.api_models import MeasurementResponse
+from power_level_monitor.server_fastapi.api_models import MeasurementUpdateRequest
+from power_level_monitor.server_fastapi.api_models import RoiPointsRequest
+from power_level_monitor.server_fastapi.api_models import RoiPointsResponse
+from power_level_monitor.server_fastapi.api_models import StatusResponse
 
 
 OBJECT_NAME = "powder_control"

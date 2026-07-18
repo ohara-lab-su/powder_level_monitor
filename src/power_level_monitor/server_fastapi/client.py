@@ -4,8 +4,8 @@ from typing import Any
 
 from ese774_frame.clients.sync_device_client import SyncDeviceClient
 
-from src.server_fastapi.api_spec import API_SPEC
-from src.server_fastapi.api_spec import OBJECT_NAME
+from power_level_monitor.server_fastapi.api_spec import API_SPEC
+from power_level_monitor.server_fastapi.api_spec import OBJECT_NAME
 
 
 class PowderControlClient(SyncDeviceClient):

@@ -1,11 +1,12 @@
-from __future__ import annotations
+#!/usr/bin/env python
+# from __future__ import annotations
 
 import time
 from dataclasses import asdict
 from dataclasses import fields
 from typing import Any
 
-from src.data_control_values import ControlValues
+from power_level_monitor.data_control_values import ControlValues
 
 
 class PowderControlDeviceClass:

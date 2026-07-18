@@ -8,7 +8,7 @@ from grpc_frame.grpc_server import create_grpc_server
 from power_level_monitor.image_stream_ctrl import ImageStreamDeviceClass
 
 
-HOST = "0.0.0.0"
+HOST = "127.0.0.1"
 PORT = 50051
 
 

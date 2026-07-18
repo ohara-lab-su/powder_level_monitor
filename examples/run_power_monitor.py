@@ -1,13 +1,13 @@
 from __future__ import annotations
 
 from ese774_frame.api_server import FastApiServer
-from ese774_frame.device_router import DeviceRouter
+from ese774_frame.routers.device_router import DeviceRouter
 
-from src.powder_control_device_class import PowderControlDeviceClass
-from src.server_fastapi.api_spec import API_SPEC
+from power_level_monitor.powder_monitor_ctrl import PowderControlDeviceClass
+from power_level_monitor.server_fastapi.api_spec import API_SPEC
 
 
-HOST = "0.0.0.0"
+HOST = "127.0.0.1"
 PORT = 8774
 
 

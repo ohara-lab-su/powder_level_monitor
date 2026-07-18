@@ -1,4 +1,4 @@
-# AandD 電子天秤 Reader (AandD reader)
+# 粉体の量変化を追いかける
 view on [github](https://github.com/ohara-lab-su/aandd_reader/) / [ohara-lab-su (doc)](https://ohara-lab-su.github.io/)
 
 
