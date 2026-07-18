@@ -33,3 +33,7 @@ class DetectorParamsResponse(BaseModel):
 
 class MeasurementResponse(BaseModel):
     result: Dict[str, Any]
+
+
+class MonitorFrameResponse(BaseModel):
+    result: Dict[str, Any]

@@ -18,7 +18,11 @@ class ImageStreamDeviceClass:
         jpeg_quality: int = 85,
         logger: Optional[Any] = None,
     ) -> None:
-        self._logger: Optional[Any] = logger
+        if logger is None:
+            import logging
+            logging.basicConfig(level=logging.INFO)
+            logger = logging.getLogger(__name__)
+        self._logger = logger
         self._camera_id: int = int(camera_id)
         self._topic_name: str = str(topic_name)
         self._interval_sec: float = float(interval_sec)
@@ -49,6 +53,7 @@ class ImageStreamDeviceClass:
         self._event_bus = event_bus
 
     def connect(self) -> bool:
+        self._logger.info("<IMAGE STREAM ACTION> connect: camera_id={}".format(self._camera_id))
         if self._capture is not None:
             if self._capture.isOpened():
                 self._start_capture_loop()
@@ -58,6 +63,7 @@ class ImageStreamDeviceClass:
 
         if not self._capture.isOpened():
             self._last_error = "Failed to open camera."
+            self._logger.error("<IMAGE STREAM ACTION> failed to open camera")
             self._capture = None
             return False
 
@@ -66,6 +72,7 @@ class ImageStreamDeviceClass:
         return True
 
     def disconnect(self) -> bool:
+        self._logger.info("<IMAGE STREAM ACTION> disconnect")
         self.stop_stream()
         self._stop_capture_loop()
 
@@ -81,6 +88,7 @@ class ImageStreamDeviceClass:
         return True
 
     def start_stream(self) -> bool:
+        self._logger.info("<IMAGE STREAM ACTION> start_stream")
         if self._event_bus is None:
             raise RuntimeError("EventBus is not set.")
 
@@ -102,6 +110,7 @@ class ImageStreamDeviceClass:
         return True
 
     def stop_stream(self) -> bool:
+        self._logger.info("<IMAGE STREAM ACTION> stop_stream")
         self._stream_stop_event.set()
 
         if self._stream_thread is not None:

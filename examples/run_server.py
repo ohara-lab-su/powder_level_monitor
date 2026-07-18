@@ -2,6 +2,7 @@ from ese774_frame.api_server import FastApiServer
 from ese774_frame.routers.device_router import DeviceRouter
 from grpc_frame.event_bus import EventBus
 from grpc_frame.grpc_server import create_grpc_server
+from x_logger import XLogger
 
 from power_level_monitor.image_stream_ctrl import ImageStreamDeviceClass
 from power_level_monitor.powder_monitor_ctrl import PowderControlDeviceClass
@@ -16,12 +17,19 @@ CAMERA_ID = 0
 
 
 def main() -> None:
+    logger = XLogger(
+        log_level="debug",
+        logger_name="PowderLevelServer",
+    )
+    logger.info("<POWDER SERVER ACTION> startup")
+
     image_device = ImageStreamDeviceClass(
         camera_id=CAMERA_ID,
         topic_name="camera.frame",
         interval_sec=0.1,
         capture_interval_sec=0.03,
         jpeg_quality=85,
+        logger=logger,
     )
 
     event_bus = EventBus()
@@ -32,9 +40,15 @@ def main() -> None:
         log_level="INFO",
     )
     grpc_server.add_insecure_port(
-        f"{GRPC_HOST}:{GRPC_PORT}",
+        "{}:{}".format(GRPC_HOST, GRPC_PORT),
     )
     grpc_server.start()
+    logger.info(
+        "<POWDER SERVER ACTION> grpc_frame started: {}:{}".format(
+            GRPC_HOST,
+            GRPC_PORT,
+        )
+    )
 
     if not image_device.connect():
         status = image_device.get_status()
@@ -51,6 +65,7 @@ def main() -> None:
         device_kwargs={
             "image_source": image_device,
             "measurement_interval_sec": 0.1,
+            "logger": logger,
         },
         logger_name="PowderControlFastApiServer",
         log_level="INFO",
@@ -64,6 +79,7 @@ def main() -> None:
             reload=False,
         )
     finally:
+        logger.info("<POWDER SERVER ACTION> shutdown")
         image_device.disconnect()
         grpc_server.stop(grace=1.0)
 

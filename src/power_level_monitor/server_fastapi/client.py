@@ -7,7 +7,7 @@ from power_level_monitor.server_fastapi.api_spec import OBJECT_NAME
 
 
 class PowderControlClient(SyncDeviceClient):
-    """ese774_frame 用の粉体制御クライアントである。"""
+    """ese774_frame 用の粉体測定クライアントである。"""
 
     def __init__(
         self,

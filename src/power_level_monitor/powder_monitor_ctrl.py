@@ -1,3 +1,4 @@
+import base64
 import threading
 import time
 from dataclasses import asdict
@@ -24,96 +25,119 @@ class PowderControlDeviceClass:
         measurement_interval_sec: float = 0.1,
         logger: Optional[Any] = None,
     ) -> None:
-        self._logger: Optional[Any] = logger
-        self._image_source: ImageStreamDeviceClass = image_source
+        if logger is None:
+            import logging
+            logging.basicConfig(level=logging.INFO)
+            logger = logging.getLogger(__name__)
+
+        self._logger = logger
+        self._image_source = image_source
         if self._image_source is None:
-            self._image_source = ImageStreamDeviceClass()
+            self._image_source = ImageStreamDeviceClass(logger=logger)
 
-        self._measurement_interval_sec: float = float(
-            measurement_interval_sec,
-        )
-        self._roi_points: List[List[int]] = []
-        self._baseline_level_y: Optional[float] = None
-        self._latest_level_y: Optional[float] = None
-        self._latest_decrease_mm: Optional[float] = None
-        self._latest_surface: Optional[SurfaceDetection] = None
-        self._latest_detected: bool = False
-        self._latest_frame_id: Optional[int] = None
-        self._latest_frame_time_ns: Optional[int] = None
-        self._control_values: ControlValues = ControlValues()
-        self._running: bool = False
-        self._connected: bool = False
-        self._timestamp_ns: Optional[int] = None
-        self._last_error: Optional[str] = None
+        self._measurement_interval_sec = float(measurement_interval_sec)
+        self._roi_points = []
+        self._baseline_level_y = None
+        self._latest_level_y = None
+        self._latest_decrease_mm = None
+        self._latest_surface = None
+        self._latest_detected = False
+        self._latest_frame_id = None
+        self._latest_frame_time_ns = None
+        self._control_values = ControlValues()
+        self._processing_running = False
+        self._measuring = False
+        self._connected = False
+        self._timestamp_ns = None
+        self._last_error = None
 
-        self._lock: threading.RLock = threading.RLock()
-        self._stop_event: threading.Event = threading.Event()
-        self._thread: Optional[threading.Thread] = None
+        self._lock = threading.RLock()
+        self._stop_event = threading.Event()
+        self._thread = None
+
+        image_status = self._image_source.get_status()
+        if image_status.get("capture_opened"):
+            self._connected = True
+            self._start_processing_loop()
+
+        self._logger.info("<POWDER ACTION> PowderControlDeviceClass initialized")
 
     def connect(self) -> bool:
-        connected: bool = self._image_source.connect()
+        self._logger.info("<POWDER ACTION> connect")
+        connected = self._image_source.connect()
 
         with self._lock:
             self._connected = connected
             self._timestamp_ns = int(time.time() * 1000000000)
-
             if connected:
                 self._last_error = None
             else:
-                status: Dict[str, Any] = self._image_source.get_status()
+                status = self._image_source.get_status()
                 self._last_error = status.get("last_error")
 
+        if connected:
+            self._start_processing_loop()
         return connected
 
     def disconnect(self) -> bool:
-        self.stop()
-        disconnected: bool = self._image_source.disconnect()
-
+        self._logger.info("<POWDER ACTION> disconnect")
+        self.stop_measurement()
+        self._stop_processing_loop()
+        disconnected = self._image_source.disconnect()
         with self._lock:
             self._connected = False
             self._timestamp_ns = int(time.time() * 1000000000)
-
         return disconnected
 
     def start(self) -> bool:
-        connected: bool = self.connect()
-        if not connected:
-            return False
-
-        with self._lock:
-            if self._running:
-                return True
-
-            self._stop_event.clear()
-            self._thread = threading.Thread(
-                target=self._measurement_loop,
-                name="PowderLevelMeasurementThread",
-                daemon=True,
-            )
-            self._running = True
-            self._timestamp_ns = int(time.time() * 1000000000)
-            self._thread.start()
-
-        return True
+        return self.start_measurement()
 
     def stop(self) -> bool:
-        self._stop_event.set()
+        return self.stop_measurement()
 
-        thread: Optional[threading.Thread] = self._thread
-        if thread is not None:
-            if thread.is_alive():
-                thread.join(timeout=2.0)
+    def start_measurement(self) -> bool:
+        self._logger.info("<POWDER ACTION> start_measurement")
+        if not self.connect():
+            return False
+
+        self.process_once()
 
         with self._lock:
-            self._thread = None
-            self._running = False
-            self._timestamp_ns = int(time.time() * 1000000000)
+            if self._measuring:
+                return True
+            if len(self._roi_points) != 4:
+                self._last_error = "ROI points are not set."
+                self._logger.error("<POWDER ACTION> start_measurement failed: ROI points are not set")
+                return False
+            if self._baseline_level_y is None:
+                self._last_error = "Baseline is not set."
+                self._logger.error("<POWDER ACTION> start_measurement failed: baseline is not set")
+                return False
+            if not self._latest_detected:
+                self._last_error = "No valid surface detection is available."
+                self._logger.error("<POWDER ACTION> start_measurement failed: no valid detection")
+                return False
 
+            self._measuring = True
+            self._timestamp_ns = int(time.time() * 1000000000)
+            self._last_error = None
+
+        self._logger.info("<POWDER ACTION> measurement started")
         return True
 
-    def process_once(self) -> bool:
-        frame: Optional[np.ndarray] = self._image_source.get_latest_frame()
+    def stop_measurement(self) -> bool:
+        self._logger.info("<POWDER ACTION> stop_measurement")
+        with self._lock:
+            self._measuring = False
+            self._timestamp_ns = int(time.time() * 1000000000)
+        return True
 
+    def is_measuring(self) -> bool:
+        with self._lock:
+            return bool(self._measuring)
+
+    def process_once(self) -> bool:
+        frame = self._image_source.get_latest_frame()
         if frame is None:
             with self._lock:
                 self._latest_detected = False
@@ -121,16 +145,14 @@ class PowderControlDeviceClass:
                 self._timestamp_ns = int(time.time() * 1000000000)
             return False
 
-        image_status: Dict[str, Any] = self._image_source.get_status()
-        frame_id: Optional[int] = image_status.get("frame_id")
-        frame_time_ns: Optional[int] = image_status.get("latest_frame_time_ns")
+        image_status = self._image_source.get_status()
+        frame_id = image_status.get("frame_id")
+        frame_time_ns = image_status.get("latest_frame_time_ns")
 
         with self._lock:
-            roi_points: List[List[int]] = self.get_roi_points()
-            controls: ControlValues = ControlValues(
-                **asdict(self._control_values),
-            )
-            baseline_level_y: Optional[float] = self._baseline_level_y
+            roi_points = self.get_roi_points()
+            controls = ControlValues(**asdict(self._control_values))
+            baseline_level_y = self._baseline_level_y
 
         if len(roi_points) != 4:
             with self._lock:
@@ -142,11 +164,7 @@ class PowderControlDeviceClass:
             return False
 
         try:
-            surface, current_level_y = self._process_frame(
-                frame,
-                roi_points,
-                controls,
-            )
+            surface, current_level_y = self._process_frame(frame, roi_points, controls)
         except Exception as exc:
             with self._lock:
                 self._latest_detected = False
@@ -154,6 +172,7 @@ class PowderControlDeviceClass:
                 self._latest_frame_time_ns = frame_time_ns
                 self._last_error = str(exc)
                 self._timestamp_ns = int(time.time() * 1000000000)
+            self._logger.error("<POWDER ACTION> process_once failed: {}".format(exc))
             return False
 
         if surface is None:
@@ -166,7 +185,7 @@ class PowderControlDeviceClass:
                 self._timestamp_ns = int(time.time() * 1000000000)
             return False
 
-        decrease_mm: Optional[float] = None
+        decrease_mm = None
         if baseline_level_y is not None:
             decrease_mm = self._pixel_delta_to_mm(
                 current_level_y=current_level_y,
@@ -183,95 +202,92 @@ class PowderControlDeviceClass:
         )
         return True
 
-    def set_roi_points(
-        self,
-        points: List[List[int]],
-    ) -> bool:
+    def set_roi_points(self, points: List[List[int]]) -> bool:
+        self._logger.info("<POWDER ACTION> set_roi_points: {}".format(points))
         if len(points) != 4:
             raise ValueError("ROI points must contain four points.")
 
-        normalized_points: List[List[int]] = []
+        normalized_points = []
         for point in points:
             if len(point) != 2:
                 raise ValueError("Each ROI point must contain x and y.")
-
-            x_value: int = int(point[0])
-            y_value: int = int(point[1])
-            normalized_points.append([x_value, y_value])
+            normalized_points.append([int(point[0]), int(point[1])])
 
         with self._lock:
             self._roi_points = normalized_points
             self._baseline_level_y = None
+            self._latest_decrease_mm = None
             self._latest_detected = False
             self._latest_surface = None
+            self._measuring = False
             self._timestamp_ns = int(time.time() * 1000000000)
             self._last_error = None
-
         return True
 
     def get_roi_points(self) -> List[List[int]]:
-        copied_points: List[List[int]] = []
-
+        copied_points = []
         with self._lock:
             for point in self._roi_points:
-                copied_point: List[int] = [
-                    int(point[0]),
-                    int(point[1]),
-                ]
-                copied_points.append(copied_point)
-
+                copied_points.append([int(point[0]), int(point[1])])
         return copied_points
 
     def clear_roi_points(self) -> bool:
+        self._logger.info("<POWDER ACTION> clear_roi_points")
         with self._lock:
             self._roi_points = []
             self._baseline_level_y = None
+            self._latest_decrease_mm = None
             self._latest_detected = False
             self._latest_surface = None
+            self._measuring = False
             self._timestamp_ns = int(time.time() * 1000000000)
-
         return True
 
     def set_baseline(self) -> bool:
+        self._logger.info("<POWDER ACTION> set_baseline")
+        self.process_once()
         with self._lock:
             if not self._latest_detected:
                 self._last_error = "No valid measurement is available."
                 return False
-
             if self._latest_level_y is None:
                 self._last_error = "No valid measurement is available."
                 return False
-
             self._baseline_level_y = self._latest_level_y
             self._latest_decrease_mm = 0.0
             self._timestamp_ns = int(time.time() * 1000000000)
             self._last_error = None
-
         return True
 
     def clear_baseline(self) -> bool:
+        self._logger.info("<POWDER ACTION> clear_baseline")
         with self._lock:
             self._baseline_level_y = None
             self._latest_decrease_mm = None
+            self._measuring = False
             self._timestamp_ns = int(time.time() * 1000000000)
-
         return True
 
     def get_baseline(self) -> Optional[float]:
         with self._lock:
             return self._baseline_level_y
 
-    def set_detector_params(
-        self,
-        params: Dict[str, Any],
-    ) -> bool:
-        control_values: ControlValues = self._make_control_values(params)
+    def set_detector_params(self, params: Dict[str, Any]) -> bool:
+        valid_names = set()
+        for field in fields(ControlValues):
+            valid_names.add(field.name)
+        unknown_names = set(params.keys()) - valid_names
+        if unknown_names:
+            raise ValueError("Unknown detector parameter(s): {}".format(sorted(unknown_names)))
 
+        current = self.get_detector_params()
+        current.update(params)
+        controls = ControlValues(**current)
+        controls.validate()
         with self._lock:
-            self._control_values = control_values
-            self._timestamp_ns = int(time.time() * 1000000000)
+            self._control_values = controls
             self._last_error = None
-
+        self._logger.info("<POWDER ACTION> set_detector_params: {}".format(params))
         return True
 
     def get_detector_params(self) -> Dict[str, Any]:
@@ -280,8 +296,7 @@ class PowderControlDeviceClass:
 
     def get_measurement(self) -> Dict[str, Any]:
         with self._lock:
-            surface_data: Optional[Dict[str, Any]] = None
-
+            surface_data = None
             if self._latest_surface is not None:
                 surface_data = {
                     "center_y": self._latest_surface.center_y,
@@ -289,8 +304,8 @@ class PowderControlDeviceClass:
                     "line_right": list(self._latest_surface.line_right),
                     "point_count": self._latest_surface.point_count,
                 }
-
             return {
+                "measuring": self._measuring,
                 "detected": self._latest_detected,
                 "level_y": self._latest_level_y,
                 "decrease_mm": self._latest_decrease_mm,
@@ -304,13 +319,28 @@ class PowderControlDeviceClass:
 
     def get_status(self) -> Dict[str, Any]:
         with self._lock:
-            running: bool = self._running
-            connected: bool = self._connected
-            last_error: Optional[str] = self._last_error
-
+            connected = self._connected
+            processing_running = self._processing_running
+            measuring = self._measuring
+            last_error = self._last_error
+        if not connected:
+            image_status = self._image_source.get_status()
+            connected = bool(image_status.get("capture_opened"))
+        if not connected:
+            state = "DISCONNECTED"
+        elif len(self.get_roi_points()) != 4:
+            state = "READY_NO_ROI"
+        elif self.get_baseline() is None:
+            state = "READY_NO_BASELINE"
+        elif measuring:
+            state = "MEASURING"
+        else:
+            state = "READY"
         return {
+            "state": state,
             "connected": connected,
-            "running": running,
+            "processing_running": processing_running,
+            "measuring": measuring,
             "has_roi": len(self.get_roi_points()) == 4,
             "roi_points": self.get_roi_points(),
             "baseline_level_y": self.get_baseline(),
@@ -320,14 +350,83 @@ class PowderControlDeviceClass:
             "last_error": last_error,
         }
 
+    def get_monitor_frame(self) -> Dict[str, Any]:
+        frame = self._image_source.get_latest_frame()
+        if frame is None:
+            return {
+                "jpeg_base64": None,
+                "frame_id": None,
+                "roi_points": self.get_roi_points(),
+                "measurement": self.get_measurement(),
+            }
+
+        preview = frame.copy()
+        roi_points = self.get_roi_points()
+        if len(roi_points) == 4:
+            polygon = np.array(roi_points, dtype=np.int32).reshape((-1, 1, 2))
+            cv2.polylines(preview, [polygon], True, (0, 255, 0), 2)
+
+        measurement = self.get_measurement()
+        status_text = "state={} detected={} decrease_mm={}".format(
+            self.get_status().get("state"),
+            measurement.get("detected"),
+            measurement.get("decrease_mm"),
+        )
+        cv2.putText(
+            preview,
+            status_text,
+            (10, 25),
+            cv2.FONT_HERSHEY_SIMPLEX,
+            0.55,
+            (0, 255, 0),
+            1,
+            cv2.LINE_AA,
+        )
+        encode_params = [int(cv2.IMWRITE_JPEG_QUALITY), 85]
+        ok, encoded = cv2.imencode(".jpg", preview, encode_params)
+        if not ok:
+            raise RuntimeError("Failed to encode monitor frame.")
+        image_status = self._image_source.get_status()
+        return {
+            "jpeg_base64": base64.b64encode(encoded.tobytes()).decode("ascii"),
+            "frame_id": image_status.get("frame_id"),
+            "roi_points": roi_points,
+            "measurement": measurement,
+        }
+
+    def _start_processing_loop(self) -> bool:
+        with self._lock:
+            if self._processing_running:
+                return True
+            self._stop_event.clear()
+            self._thread = threading.Thread(
+                target=self._measurement_loop,
+                name="PowderLevelProcessingThread",
+                daemon=True,
+            )
+            self._processing_running = True
+            self._thread.start()
+        self._logger.info("<POWDER ACTION> processing loop started")
+        return True
+
+    def _stop_processing_loop(self) -> bool:
+        self._stop_event.set()
+        thread = self._thread
+        if thread is not None:
+            if thread.is_alive():
+                thread.join(timeout=2.0)
+        with self._lock:
+            self._thread = None
+            self._processing_running = False
+        self._logger.info("<POWDER ACTION> processing loop stopped")
+        return True
+
     def _measurement_loop(self) -> None:
         while not self._stop_event.is_set():
             self.process_once()
             time.sleep(self._measurement_interval_sec)
-
         with self._lock:
-            self._running = False
-
+            self._processing_running = False
     def _process_frame(
         self,
         frame: np.ndarray,

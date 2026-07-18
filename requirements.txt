@@ -1,4 +1,8 @@
-dataclasses==0.8; python_version < "3.7"
 numpy==1.19.5
 opencv-python==4.5.5.64
 pydantic==1.9.2
+dataclasses==0.8
+Pillow==8.4.0
+ese774-frame
+grpc-frame
+x-logger
