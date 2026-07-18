@@ -1,15 +1,12 @@
-#!/usr/bin/env python
-#from __future__ import annotations
+from __future__ import annotations
 
-from ese774_frame.models.api_spec import  ApiSpec
+from ese774_frame.api_spec import ApiSpec
 
-from power_level_monitor.server_fastapi.api_models import BaselineRequest
 from power_level_monitor.server_fastapi.api_models import BaselineResponse
 from power_level_monitor.server_fastapi.api_models import BoolResponse
 from power_level_monitor.server_fastapi.api_models import DetectorParamsRequest
 from power_level_monitor.server_fastapi.api_models import DetectorParamsResponse
 from power_level_monitor.server_fastapi.api_models import MeasurementResponse
-from power_level_monitor.server_fastapi.api_models import MeasurementUpdateRequest
 from power_level_monitor.server_fastapi.api_models import RoiPointsRequest
 from power_level_monitor.server_fastapi.api_models import RoiPointsResponse
 from power_level_monitor.server_fastapi.api_models import StatusResponse
@@ -52,6 +49,14 @@ API_SPEC = [
         summary="stop",
     ),
     ApiSpec(
+        name="process_once",
+        object_name=OBJECT_NAME,
+        request_model=None,
+        response_model=BoolResponse,
+        method="post",
+        summary="process_once",
+    ),
+    ApiSpec(
         name="get_status",
         object_name=OBJECT_NAME,
         request_model=None,
@@ -86,10 +91,18 @@ API_SPEC = [
     ApiSpec(
         name="set_baseline",
         object_name=OBJECT_NAME,
-        request_model=BaselineRequest,
+        request_model=None,
         response_model=BoolResponse,
         method="post",
         summary="set_baseline",
+    ),
+    ApiSpec(
+        name="clear_baseline",
+        object_name=OBJECT_NAME,
+        request_model=None,
+        response_model=BoolResponse,
+        method="post",
+        summary="clear_baseline",
     ),
     ApiSpec(
         name="get_baseline",
@@ -114,14 +127,6 @@ API_SPEC = [
         response_model=DetectorParamsResponse,
         method="get",
         summary="get_detector_params",
-    ),
-    ApiSpec(
-        name="update_measurement",
-        object_name=OBJECT_NAME,
-        request_model=MeasurementUpdateRequest,
-        response_model=BoolResponse,
-        method="post",
-        summary="update_measurement",
     ),
     ApiSpec(
         name="get_measurement",

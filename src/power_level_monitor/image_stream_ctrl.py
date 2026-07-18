@@ -1,26 +1,22 @@
-#!/usr/bin/env python
-# from __future__ import annotations
+from __future__ import annotations
 
 import threading
 import time
 from typing import Any
 
 import cv2
+import numpy as np
 
 
 class ImageStreamDeviceClass:
-    """画像転送用のローカル DeviceClass である。
-
-    grpc_frame の create_grpc_server に ctrl_obj として渡す実体である。
-    gRPC の Control RPC では public メソッドが公開される。
-    EventBus は grpc_frame 側から _set_event_bus() で注入される。
-    """
+    """サーバーローカルのカメラ画像取得と画像配信を行う。"""
 
     def __init__(
         self,
         camera_id: int = 0,
         topic_name: str = "camera.frame",
         interval_sec: float = 0.1,
+        capture_interval_sec: float = 0.03,
         jpeg_quality: int = 85,
         logger: Any | None = None,
     ) -> None:
@@ -28,15 +24,23 @@ class ImageStreamDeviceClass:
         self._camera_id: int = int(camera_id)
         self._topic_name: str = str(topic_name)
         self._interval_sec: float = float(interval_sec)
+        self._capture_interval_sec: float = float(capture_interval_sec)
         self._jpeg_quality: int = int(jpeg_quality)
 
         self._event_bus: Any | None = None
         self._capture: cv2.VideoCapture | None = None
-        self._thread: threading.Thread | None = None
-        self._stop_event: threading.Event = threading.Event()
+        self._capture_thread: threading.Thread | None = None
+        self._stream_thread: threading.Thread | None = None
+        self._capture_stop_event: threading.Event = threading.Event()
+        self._stream_stop_event: threading.Event = threading.Event()
+        self._frame_lock: threading.Lock = threading.Lock()
 
-        self._running: bool = False
+        self._capture_running: bool = False
+        self._stream_running: bool = False
         self._frame_id: int = 0
+        self._latest_frame_id: int = 0
+        self._latest_frame: np.ndarray | None = None
+        self._latest_frame_time_ns: int | None = None
         self._last_error: str | None = None
         self._last_publish_time_ns: int | None = None
 
@@ -44,52 +48,41 @@ class ImageStreamDeviceClass:
         self,
         event_bus: Any,
     ) -> None:
-        """grpc_frame から EventBus を受け取る。
-
-        Args:
-            event_bus: grpc_frame.event_bus.EventBus 互換オブジェクトである。
-        """
         self._event_bus = event_bus
 
     def connect(self) -> bool:
-        """カメラを開く。
-
-        Returns:
-            bool: 接続処理の結果である。
-        """
         if self._capture is not None:
             if self._capture.isOpened():
+                self._start_capture_loop()
                 return True
 
         self._capture = cv2.VideoCapture(self._camera_id)
 
         if not self._capture.isOpened():
             self._last_error = "Failed to open camera."
+            self._capture = None
             return False
 
         self._last_error = None
+        self._start_capture_loop()
         return True
 
     def disconnect(self) -> bool:
-        """画像転送を停止し、カメラを閉じる。
-
-        Returns:
-            bool: 切断処理の結果である。
-        """
         self.stop_stream()
+        self._stop_capture_loop()
 
         if self._capture is not None:
             self._capture.release()
 
         self._capture = None
+
+        with self._frame_lock:
+            self._latest_frame = None
+            self._latest_frame_time_ns = None
+
         return True
 
     def start_stream(self) -> bool:
-        """画像イベント配信を開始する。
-
-        Returns:
-            bool: 開始処理の結果である。
-        """
         if self._event_bus is None:
             raise RuntimeError("EventBus is not set.")
 
@@ -97,84 +90,63 @@ class ImageStreamDeviceClass:
         if not connected:
             return False
 
-        if self._running:
+        if self._stream_running:
             return True
 
-        self._stop_event.clear()
-        self._thread = threading.Thread(
+        self._stream_stop_event.clear()
+        self._stream_thread = threading.Thread(
             target=self._stream_loop,
-            name="ImageStreamDeviceClass",
+            name="ImageStreamPublishThread",
             daemon=True,
         )
-        self._running = True
-        self._thread.start()
+        self._stream_running = True
+        self._stream_thread.start()
         return True
 
     def stop_stream(self) -> bool:
-        """画像イベント配信を停止する。
+        self._stream_stop_event.set()
 
-        Returns:
-            bool: 停止処理の結果である。
-        """
-        self._stop_event.set()
+        if self._stream_thread is not None:
+            if self._stream_thread.is_alive():
+                self._stream_thread.join(timeout=2.0)
 
-        if self._thread is not None:
-            if self._thread.is_alive():
-                self._thread.join(timeout=2.0)
-
-        self._thread = None
-        self._running = False
+        self._stream_thread = None
+        self._stream_running = False
         return True
 
-    def get_status(self) -> dict[str, Any]:
-        """画像転送 DeviceClass の状態を取得する。
+    def get_latest_frame(
+        self,
+        copy_frame: bool = True,
+    ) -> np.ndarray | None:
+        with self._frame_lock:
+            if self._latest_frame is None:
+                return None
 
-        Returns:
-            dict[str, Any]: 状態である。
-        """
-        capture_opened: bool = False
-        if self._capture is not None:
-            capture_opened = bool(self._capture.isOpened())
+            if copy_frame:
+                return self._latest_frame.copy()
 
-        return {
-            "running": self._running,
-            "camera_id": self._camera_id,
-            "capture_opened": capture_opened,
-            "topic_name": self._topic_name,
-            "interval_sec": self._interval_sec,
-            "jpeg_quality": self._jpeg_quality,
-            "frame_id": self._frame_id,
-            "last_publish_time_ns": self._last_publish_time_ns,
-            "last_error": self._last_error,
-        }
+            return self._latest_frame
 
     def capture_once(self) -> dict[str, Any]:
-        """画像を1枚取得し、JPEG bytes を返す。
-
-        Returns:
-            dict[str, Any]: JPEG 画像 payload である。
-        """
         connected: bool = self.connect()
         if not connected:
             raise RuntimeError(str(self._last_error))
 
-        if self._capture is None:
-            raise RuntimeError("Camera is not connected.")
+        frame: np.ndarray | None = self.get_latest_frame()
 
-        ok, frame = self._capture.read()
-        if not ok:
-            self._last_error = "Failed to read frame."
-            raise RuntimeError(self._last_error)
+        if frame is None:
+            timeout_time: float = time.monotonic() + 2.0
 
-        payload: dict[str, Any] = self._encode_frame(frame)
-        return payload
+            while frame is None:
+                if time.monotonic() >= timeout_time:
+                    raise RuntimeError("No camera frame is available.")
+
+                time.sleep(0.01)
+                frame = self.get_latest_frame()
+
+        return self._encode_frame(frame)
 
     def publish_once(self) -> bool:
-        """画像を1枚取得し、EventBus へ publish する。
-
-        Returns:
-            bool: publish 処理の結果である。
-        """
         if self._event_bus is None:
             raise RuntimeError("EventBus is not set.")
 
@@ -187,9 +159,76 @@ class ImageStreamDeviceClass:
         self._last_publish_time_ns = time.time_ns()
         return True
 
+    def get_status(self) -> dict[str, Any]:
+        capture_opened: bool = False
+        if self._capture is not None:
+            capture_opened = bool(self._capture.isOpened())
+
+        return {
+            "capture_running": self._capture_running,
+            "stream_running": self._stream_running,
+            "camera_id": self._camera_id,
+            "capture_opened": capture_opened,
+            "topic_name": self._topic_name,
+            "interval_sec": self._interval_sec,
+            "capture_interval_sec": self._capture_interval_sec,
+            "jpeg_quality": self._jpeg_quality,
+            "frame_id": self._latest_frame_id,
+            "latest_frame_time_ns": self._latest_frame_time_ns,
+            "last_publish_time_ns": self._last_publish_time_ns,
+            "last_error": self._last_error,
+        }
+
+    def _start_capture_loop(self) -> None:
+        if self._capture_running:
+            return
+
+        self._capture_stop_event.clear()
+        self._capture_thread = threading.Thread(
+            target=self._capture_loop,
+            name="ImageStreamCaptureThread",
+            daemon=True,
+        )
+        self._capture_running = True
+        self._capture_thread.start()
+
+    def _stop_capture_loop(self) -> None:
+        self._capture_stop_event.set()
+
+        if self._capture_thread is not None:
+            if self._capture_thread.is_alive():
+                self._capture_thread.join(timeout=2.0)
+
+        self._capture_thread = None
+        self._capture_running = False
+
+    def _capture_loop(self) -> None:
+        while not self._capture_stop_event.is_set():
+            if self._capture is None:
+                self._last_error = "Camera is not connected."
+                break
+
+            ok, frame = self._capture.read()
+
+            if not ok:
+                self._last_error = "Failed to read frame."
+                time.sleep(self._capture_interval_sec)
+                continue
+
+            frame_time_ns: int = time.time_ns()
+
+            with self._frame_lock:
+                self._latest_frame_id = self._latest_frame_id + 1
+                self._latest_frame = frame.copy()
+                self._latest_frame_time_ns = frame_time_ns
+
+            self._last_error = None
+            time.sleep(self._capture_interval_sec)
+
+        self._capture_running = False
+
     def _stream_loop(self) -> None:
-        """画像を周期的に publish する内部ループである。"""
-        while not self._stop_event.is_set():
+        while not self._stream_stop_event.is_set():
             try:
                 self.publish_once()
             except Exception as exc:
@@ -197,20 +236,12 @@ class ImageStreamDeviceClass:
 
             time.sleep(self._interval_sec)
 
-        self._running = False
+        self._stream_running = False
 
     def _encode_frame(
         self,
-        frame: Any,
+        frame: np.ndarray,
     ) -> dict[str, Any]:
-        """OpenCV frame を JPEG payload に変換する。
-
-        Args:
-            frame: OpenCV BGR 画像である。
-
-        Returns:
-            dict[str, Any]: EventBus に載せる payload である。
-        """
         encode_params: list[int] = [
             int(cv2.IMWRITE_JPEG_QUALITY),
             self._jpeg_quality,
@@ -232,7 +263,9 @@ class ImageStreamDeviceClass:
 
         return {
             "frame_id": self._frame_id,
+            "camera_frame_id": self._latest_frame_id,
             "timestamp_ns": time.time_ns(),
+            "camera_timestamp_ns": self._latest_frame_time_ns,
             "encoding": "jpg",
             "width": width,
             "height": height,

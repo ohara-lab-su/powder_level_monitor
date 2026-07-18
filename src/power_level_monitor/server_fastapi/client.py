@@ -24,18 +24,3 @@ class PowderControlClient(SyncDeviceClient):
             logger=logger,
             object_name=OBJECT_NAME,
         )
-
-
-def main() -> None:
-    """接続確認用の最小クライアントである。"""
-    client = PowderControlClient(
-        server_ip="127.0.0.1",
-        server_port=8774,
-    )
-
-    print(client.connect())
-    print(client.get_status())
-
-
-if __name__ == "__main__":
-    main()
