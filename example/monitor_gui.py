@@ -5,9 +5,9 @@ import sys
 
 import cv2
 import numpy as np
-from PyQt5 import QtCore
-from PyQt5 import QtGui
-from PyQt5 import QtWidgets
+from PySide6 import QtCore
+from PySide6 import QtGui
+from PySide6 import QtWidgets
 
 from power_level_monitor.grpc_client import PowderLevelGrpcClient
 from x_logger import XLogger
@@ -22,7 +22,7 @@ STATUS_REFRESH_MS = 500
 
 
 class ImageLabel(QtWidgets.QLabel):
-    image_clicked = QtCore.pyqtSignal(int, int)
+    image_clicked = QtCore.Signal(int, int)
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -30,7 +30,7 @@ class ImageLabel(QtWidgets.QLabel):
         self._source_height = 0
         self._display_rect = QtCore.QRect()
         self.setMinimumSize(640, 480)
-        self.setAlignment(QtCore.Qt.AlignCenter)
+        self.setAlignment(QtCore.Qt.AlignmentFlag.AlignCenter)
         self.setStyleSheet("background-color: black;")
 
     def set_source_size(self, width, height):
@@ -41,7 +41,7 @@ class ImageLabel(QtWidgets.QLabel):
         self._display_rect = QtCore.QRect(rect)
 
     def mousePressEvent(self, event):
-        if event.button() != QtCore.Qt.LeftButton:
+        if event.button() != QtCore.Qt.MouseButton.LeftButton:
             return
 
         if self._source_width <= 0:
@@ -50,11 +50,11 @@ class ImageLabel(QtWidgets.QLabel):
         if self._source_height <= 0:
             return
 
-        if not self._display_rect.contains(event.pos()):
+        if not self._display_rect.contains(event.position().toPoint()):
             return
 
-        x_value = event.x() - self._display_rect.x()
-        y_value = event.y() - self._display_rect.y()
+        x_value = event.position().x() - self._display_rect.x()
+        y_value = event.position().y() - self._display_rect.y()
 
         source_x = int(
             x_value
@@ -71,8 +71,8 @@ class ImageLabel(QtWidgets.QLabel):
 
 
 class ImageSubscriptionThread(QtCore.QThread):
-    frame_received = QtCore.pyqtSignal(object, object)
-    subscription_error = QtCore.pyqtSignal(str)
+    frame_received = QtCore.Signal(object, object)
+    subscription_error = QtCore.Signal(str)
 
     def __init__(self, client, topic, logger, parent=None):
         super().__init__(parent)
@@ -246,12 +246,12 @@ class PowderMonitorGui(QtWidgets.QMainWindow):
                 "画像配信開始失敗: {}".format(exc)
             )
 
-    @QtCore.pyqtSlot(object, object)
+    @QtCore.Slot(object, object)
     def _on_frame_received(self, frame, frame_id):
         self._latest_frame = frame
         self._latest_frame_id = frame_id
 
-    @QtCore.pyqtSlot(str)
+    @QtCore.Slot(str)
     def _on_subscription_error(self, message):
         self._status_label.setText(
             "画像受信エラー: {}".format(message)
@@ -270,7 +270,7 @@ class PowderMonitorGui(QtWidgets.QMainWindow):
             "画面上の未送信ROIをクリアしました"
         )
 
-    @QtCore.pyqtSlot(int, int)
+    @QtCore.Slot(int, int)
     def _on_image_click(self, x_value, y_value):
         if not self._editing_roi:
             return
@@ -420,14 +420,14 @@ class PowderMonitorGui(QtWidgets.QMainWindow):
             width,
             height,
             bytes_per_line,
-            QtGui.QImage.Format_RGB888,
+            QtGui.QImage.Format.Format_RGB888,
         ).copy()
 
         pixmap = QtGui.QPixmap.fromImage(image)
         scaled_pixmap = pixmap.scaled(
             self._image_label.size(),
-            QtCore.Qt.KeepAspectRatio,
-            QtCore.Qt.SmoothTransformation,
+            QtCore.Qt.AspectRatioMode.KeepAspectRatio,
+            QtCore.Qt.TransformationMode.SmoothTransformation,
         )
 
         x_offset = int(
@@ -519,7 +519,7 @@ def main():
     app = QtWidgets.QApplication(sys.argv)
     window = PowderMonitorGui()
     window.show()
-    sys.exit(app.exec_())
+    sys.exit(app.exec())
 
 
 if __name__ == "__main__":

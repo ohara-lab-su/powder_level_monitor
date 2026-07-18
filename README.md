@@ -49,7 +49,7 @@ ImageStreamDeviceClass
 
 ## GUI
 
-GUIはQtのPyQt5で実装しています。`tkinter` は使用しません。
+GUIはQtのPySide6で実装しています。`tkinter` は使用しません。
 
 ```bash
 python examples/monitor_gui.py
