@@ -2,7 +2,8 @@ from grpc_frame.event_bus import EventBus
 from grpc_frame.grpc_server import create_grpc_server
 from x_logger import XLogger
 
-from powder_level_monitor.powder_level_device import PowderLevelDeviceClass
+from powder_level_monitor.server_grpc import PowderLevelGrpcService
+
 
 
 GRPC_HOST = "0.0.0.0"
@@ -18,7 +19,7 @@ def main():
     )
     logger.info("<POWDER SERVER ACTION> startup")
 
-    device = PowderLevelDeviceClass(
+    device = PowderLevelGrpcService(
         camera_id=CAMERA_ID,
         image_topic="camera.frame",
         image_interval_sec=0.1,

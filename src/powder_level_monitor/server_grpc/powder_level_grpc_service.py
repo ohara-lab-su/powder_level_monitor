@@ -6,7 +6,7 @@ from powder_level_monitor.image_stream_ctrl import ImageStreamDeviceClass
 from powder_level_monitor.powder_monitor_ctrl import PowderControlDeviceClass
 
 
-class PowderLevelDeviceClass:
+class PowderLevelGrpcService:
     """画像取得・gRPC画像配信・粉体測定を一つの制御対象として公開する。"""
 
     def __init__(

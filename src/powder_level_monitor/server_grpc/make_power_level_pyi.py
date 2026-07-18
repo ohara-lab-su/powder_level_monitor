@@ -17,15 +17,15 @@ def main() -> None:
     grpc_base = pathlib.Path(grpc_frame.__file__).resolve().parent
 
     # sync
-    out = base / "grpc_client.pyi"
+    out = base / "powder_level_grpc_client.pyi"
 
     generate_client_pyi(
         ### client
-        client_py=base / "grpc_client.py",
+        client_py=base / "powder_level_grpc_client.py",
         client_class="PowderLevelGrpcClient",
         ### Ctrl
-        ctrl_py=base / "../powder_level_device.py",
-        ctrl_class="PowderLevelDeviceClass",
+        ctrl_py=base / "powder_level_grpc_service.py",
+        ctrl_class="PowderLevelGrpcService",
         ### Grpc
         base_py=grpc_base / "grpc_client.py",
         base_class="GrpcClient",
