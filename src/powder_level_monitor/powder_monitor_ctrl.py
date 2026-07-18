@@ -7,9 +7,9 @@ from typing import Any, Dict, List, Optional, Set, Tuple
 import cv2
 import numpy as np
 
-from powder_level_monitor.data_control_values import ControlValues
-from powder_level_monitor.data_surface_detection import SurfaceDetection
-from powder_level_monitor.image_stream_ctrl import ImageStreamDeviceClass
+from power_level_monitor.data_control_values import ControlValues
+from power_level_monitor.data_surface_detection import SurfaceDetection
+from power_level_monitor.image_stream_ctrl import ImageStreamDeviceClass
 
 
 class PowderControlDeviceClass:
@@ -39,7 +39,11 @@ class PowderControlDeviceClass:
         self._measurement_interval_sec = float(measurement_interval_sec)
         self._roi_points = []
         self._baseline_level_y = None
+        self._baseline_line_left = None
+        self._baseline_line_right = None
         self._latest_level_y = None
+        self._latest_line_left = None
+        self._latest_line_right = None
         self._latest_decrease_mm = None
         self._latest_surface = None
         self._latest_detected = False
@@ -165,7 +169,16 @@ class PowderControlDeviceClass:
             return False
 
         try:
-            surface, current_level_y = self._process_frame(frame, roi_points, controls)
+            (
+                surface,
+                current_level_y,
+                line_left,
+                line_right,
+            ) = self._process_frame(
+                frame,
+                roi_points,
+                controls,
+            )
         except Exception as exc:
             with self._lock:
                 self._latest_detected = False
@@ -197,6 +210,8 @@ class PowderControlDeviceClass:
         self._update_measurement(
             surface=surface,
             level_y=current_level_y,
+            line_left=line_left,
+            line_right=line_right,
             decrease_mm=decrease_mm,
             frame_id=frame_id,
             frame_time_ns=frame_time_ns,
@@ -217,6 +232,10 @@ class PowderControlDeviceClass:
         with self._lock:
             self._roi_points = normalized_points
             self._baseline_level_y = None
+            self._baseline_line_left = None
+            self._baseline_line_right = None
+            self._latest_line_left = None
+            self._latest_line_right = None
             self._latest_decrease_mm = None
             self._latest_detected = False
             self._latest_surface = None
@@ -237,6 +256,10 @@ class PowderControlDeviceClass:
         with self._lock:
             self._roi_points = []
             self._baseline_level_y = None
+            self._baseline_line_left = None
+            self._baseline_line_right = None
+            self._latest_line_left = None
+            self._latest_line_right = None
             self._latest_decrease_mm = None
             self._latest_detected = False
             self._latest_surface = None
@@ -255,6 +278,8 @@ class PowderControlDeviceClass:
                 self._last_error = "No valid measurement is available."
                 return False
             self._baseline_level_y = self._latest_level_y
+            self._baseline_line_left = self._latest_line_left
+            self._baseline_line_right = self._latest_line_right
             self._latest_decrease_mm = 0.0
             self._timestamp_ns = int(time.time() * 1000000000)
             self._last_error = None
@@ -264,6 +289,8 @@ class PowderControlDeviceClass:
         self._logger.info("<POWDER ACTION> clear_baseline")
         with self._lock:
             self._baseline_level_y = None
+            self._baseline_line_left = None
+            self._baseline_line_right = None
             self._latest_decrease_mm = None
             self._measuring = False
             self._timestamp_ns = int(time.time() * 1000000000)
@@ -305,12 +332,58 @@ class PowderControlDeviceClass:
                     "line_right": list(self._latest_surface.line_right),
                     "point_count": self._latest_surface.point_count,
                 }
+
+            line_left = None
+            if self._latest_line_left is not None:
+                line_left = list(self._latest_line_left)
+
+            line_right = None
+            if self._latest_line_right is not None:
+                line_right = list(self._latest_line_right)
+
+            baseline_line_left = None
+            if self._baseline_line_left is not None:
+                baseline_line_left = list(self._baseline_line_left)
+
+            baseline_line_right = None
+            if self._baseline_line_right is not None:
+                baseline_line_right = list(self._baseline_line_right)
+
+            decrease_px = None
+            decrease_ratio = None
+            if self._baseline_level_y is not None:
+                if self._latest_level_y is not None:
+                    decrease_px = (
+                        self._latest_level_y
+                        - self._baseline_level_y
+                    )
+                    decrease_ratio = (
+                        decrease_px
+                        / float(self.RECTIFIED_HEIGHT)
+                    )
+
+            baseline_set = self._baseline_level_y is not None
+            baseline_detected = (
+                baseline_set
+                and baseline_line_left is not None
+                and baseline_line_right is not None
+            )
+
             return {
                 "measuring": self._measuring,
                 "detected": self._latest_detected,
+                "current_detected": self._latest_detected,
+                "baseline_set": baseline_set,
+                "baseline_detected": baseline_detected,
                 "level_y": self._latest_level_y,
+                "line_left": line_left,
+                "line_right": line_right,
+                "decrease_px": decrease_px,
                 "decrease_mm": self._latest_decrease_mm,
+                "decrease_ratio": decrease_ratio,
                 "baseline_level_y": self._baseline_level_y,
+                "baseline_line_left": baseline_line_left,
+                "baseline_line_right": baseline_line_right,
                 "surface": surface_data,
                 "frame_id": self._latest_frame_id,
                 "frame_timestamp_ns": self._latest_frame_time_ns,
@@ -389,7 +462,12 @@ class PowderControlDeviceClass:
         frame: np.ndarray,
         roi_points: List[List[int]],
         controls: ControlValues,
-    ) -> Tuple[Optional[SurfaceDetection], Optional[float]]:
+    ) -> Tuple[
+        Optional[SurfaceDetection],
+        Optional[float],
+        Optional[Tuple[int, int]],
+        Optional[Tuple[int, int]],
+    ]:
         matrix: np.ndarray = self._create_perspective_matrix(roi_points)
         rectified: np.ndarray = cv2.warpPerspective(
             frame,
@@ -414,10 +492,41 @@ class PowderControlDeviceClass:
         )
 
         if surface is None:
-            return None, None
+            return None, None, None, None
 
         current_level_y: float = inner_box[1] + surface.center_y
-        return surface, current_level_y
+
+        rectified_line = np.array(
+            [
+                [
+                    [
+                        inner_box[0] + surface.line_left[0],
+                        inner_box[1] + surface.line_left[1],
+                    ],
+                    [
+                        inner_box[0] + surface.line_right[0],
+                        inner_box[1] + surface.line_right[1],
+                    ],
+                ]
+            ],
+            dtype=np.float32,
+        )
+        inverse_matrix = np.linalg.inv(matrix)
+        source_line = cv2.perspectiveTransform(
+            rectified_line,
+            inverse_matrix,
+        )[0]
+
+        line_left = (
+            int(round(float(source_line[0][0]))),
+            int(round(float(source_line[0][1]))),
+        )
+        line_right = (
+            int(round(float(source_line[1][0]))),
+            int(round(float(source_line[1][1]))),
+        )
+
+        return surface, current_level_y, line_left, line_right
 
     def _create_perspective_matrix(
         self,
@@ -684,6 +793,8 @@ class PowderControlDeviceClass:
         self,
         surface: SurfaceDetection,
         level_y: float,
+        line_left: Tuple[int, int],
+        line_right: Tuple[int, int],
         decrease_mm: Optional[float],
         frame_id: Optional[int],
         frame_time_ns: Optional[int],
@@ -691,6 +802,8 @@ class PowderControlDeviceClass:
         with self._lock:
             self._latest_surface = surface
             self._latest_level_y = float(level_y)
+            self._latest_line_left = line_left
+            self._latest_line_right = line_right
             self._latest_decrease_mm = decrease_mm
             self._latest_detected = True
             self._latest_frame_id = frame_id

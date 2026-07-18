@@ -9,7 +9,7 @@ from PySide6 import QtCore
 from PySide6 import QtGui
 from PySide6 import QtWidgets
 
-from powder_level_monitor.server_grpc import PowderLevelGrpcClient
+from power_level_monitor.grpc_client import PowderLevelGrpcClient
 from x_logger import XLogger
 
 
@@ -381,13 +381,9 @@ class PowderMonitorGui(QtWidgets.QMainWindow):
         try:
             status = self._client.get_status()
             measurement = self._client.get_measurement()
-
             self._latest_measurement = measurement
+            self._server_roi_points = status.get("roi_points", [])
 
-            self._server_roi_points = status.get(
-                "roi_points",
-                [],
-            )
             if measurement.get("measuring"):
                 measurement_state = "測定中"
             else:
@@ -481,59 +477,55 @@ class PowderMonitorGui(QtWidgets.QMainWindow):
             (0, 255, 255),
         )
 
-        #
-        # Baseline（赤）
-        #
-        if self._latest_measurement.get(
-            "baseline_detected",
-        ):
-            baseline_y = int(
-                self._latest_measurement.get(
-                    "baseline_level_y",
-                )
-            )
-
-            cv2.line(
-                frame,
-                (0, baseline_y),
-                (
-                    frame.shape[1] - 1,
-                    baseline_y,
-                ),
-                (0, 0, 255),
-                2,
-                cv2.LINE_AA,
-            )
-
-        #
-        # 現在粉面（青）
-        #
-        if self._latest_measurement.get(
-            "current_detected",
-        ):
-            current_y = int(
-                self._latest_measurement.get(
-                    "level_y",
-                )
-            )
-
-            cv2.line(
-                frame,
-                (0, current_y),
-                (
-                    frame.shape[1] - 1,
-                    current_y,
-                ),
-                (255, 0, 0),
-                2,
-                cv2.LINE_AA,
-            )
-
-        rgb = cv2.cvtColor(
-            frame,
-            cv2.COLOR_BGR2RGB,
+        baseline_line_left = self._latest_measurement.get(
+            "baseline_line_left",
+        )
+        baseline_line_right = self._latest_measurement.get(
+            "baseline_line_right",
         )
 
+        if baseline_line_left is not None:
+            if baseline_line_right is not None:
+                cv2.line(
+                    frame,
+                    (
+                        int(baseline_line_left[0]),
+                        int(baseline_line_left[1]),
+                    ),
+                    (
+                        int(baseline_line_right[0]),
+                        int(baseline_line_right[1]),
+                    ),
+                    (0, 0, 255),
+                    2,
+                    cv2.LINE_AA,
+                )
+
+        current_line_left = self._latest_measurement.get(
+            "line_left",
+        )
+        current_line_right = self._latest_measurement.get(
+            "line_right",
+        )
+
+        if current_line_left is not None:
+            if current_line_right is not None:
+                cv2.line(
+                    frame,
+                    (
+                        int(current_line_left[0]),
+                        int(current_line_left[1]),
+                    ),
+                    (
+                        int(current_line_right[0]),
+                        int(current_line_right[1]),
+                    ),
+                    (255, 0, 0),
+                    2,
+                    cv2.LINE_AA,
+                )
+
+        rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
         height = int(rgb.shape[0])
         width = int(rgb.shape[1])
         bytes_per_line = int(rgb.strides[0])
