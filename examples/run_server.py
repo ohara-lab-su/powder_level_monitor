@@ -1,3 +1,5 @@
+
+"""粉体レベル監視用 gRPC サーバーを起動する。"""
 from grpc_frame.event_bus import EventBus
 from grpc_frame.grpc_server import create_grpc_server
 from x_logger import XLogger
@@ -13,6 +15,7 @@ MAX_MESSAGE_MB = 64
 
 
 def main():
+    """エントリーポイントを実行する。"""
     logger = XLogger(
         log_level="debug",
         logger_name="PowderLevelServer",
@@ -29,6 +32,7 @@ def main():
         logger=logger,
     )
     event_bus = EventBus()
+    # JPEG画像を含むため、クライアントと同じメッセージ上限をサーバーにも設定する。
     max_message_bytes = MAX_MESSAGE_MB * 1024 * 1024
     server = create_grpc_server(
         ctrl_obj=device,

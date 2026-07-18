@@ -1,3 +1,5 @@
+
+"""カメラ画像の継続取得、JPEG符号化、および EventBus 配信を制御する。"""
 import threading
 import time
 from typing import Any, Dict, List, Optional
@@ -7,7 +9,7 @@ import numpy as np
 
 
 class ImageStreamDeviceClass:
-    """サーバーローカルのカメラ画像取得と画像配信を行う。"""
+    """カメラ画像を別スレッドで継続取得し、必要に応じてEventBusへJPEG配信する。"""
 
     def __init__(
         self,
@@ -18,6 +20,16 @@ class ImageStreamDeviceClass:
         jpeg_quality: int = 85,
         logger: Optional[Any] = None,
     ) -> None:
+        """カメラ取得・画像配信の状態と同期オブジェクトを初期化する。
+        
+        Args:
+            camera_id: OpenCVへ渡すカメラデバイス番号。
+            topic_name: EventBusへ画像を配信するトピック名。
+            interval_sec: 画像配信周期（秒）。
+            capture_interval_sec: カメラ取得ループの待機時間（秒）。
+            jpeg_quality: JPEG符号化品質。
+            logger: 動作ログを出力するロガー。
+        """
         if logger is None:
             from x_logger import XLogger
 
@@ -54,9 +66,19 @@ class ImageStreamDeviceClass:
         self,
         event_bus: Any,
     ) -> None:
+        """grpc_frame から渡された EventBus を画像配信処理へ設定する。
+        
+        Args:
+            event_bus: 画像イベントの配信に使用する EventBus。
+        """
         self._event_bus = event_bus
 
     def connect(self) -> bool:
+        """必要なデバイス接続と内部処理ループを開始する。
+        
+        Returns:
+            接続と起動に成功した場合は True、それ以外は False。
+        """
         self._logger.info(
             "<IMAGE STREAM ACTION> connect: camera_id={}".format(
                 self._camera_id,
@@ -68,6 +90,7 @@ class ImageStreamDeviceClass:
                 self._start_capture_loop()
                 return True
 
+        # カメラは取得スレッドだけが read() し、他処理は最新フレームのコピーを参照する。
         self._capture = cv2.VideoCapture(self._camera_id)
 
         if not self._capture.isOpened():
@@ -83,6 +106,11 @@ class ImageStreamDeviceClass:
         return True
 
     def disconnect(self) -> bool:
+        """内部処理ループを停止し、デバイス接続を解放する。
+        
+        Returns:
+            正常に切断処理を完了した場合は True。
+        """
         self._logger.info("<IMAGE STREAM ACTION> disconnect")
         self.stop_stream()
         self._stop_capture_loop()
@@ -99,6 +127,14 @@ class ImageStreamDeviceClass:
         return True
 
     def start_stream(self) -> bool:
+        """最新画像を一定周期で EventBus へ配信するスレッドを開始する。
+        
+        Returns:
+            配信を開始できた場合は True。
+        
+        Raises:
+            RuntimeError: EventBus が設定されていない場合。
+        """
         self._logger.info("<IMAGE STREAM ACTION> start_stream")
 
         if self._event_bus is None:
@@ -122,6 +158,11 @@ class ImageStreamDeviceClass:
         return True
 
     def stop_stream(self) -> bool:
+        """画像配信スレッドを停止する。
+        
+        Returns:
+            停止済みまたは正常に停止した場合は True。
+        """
         if not self._stream_running:
             return True
 
@@ -140,6 +181,14 @@ class ImageStreamDeviceClass:
         self,
         copy_frame: bool = True,
     ) -> Optional[np.ndarray]:
+        """スレッド間で保護された最新カメラ画像を取得する。
+        
+        Args:
+            copy_frame: Trueの場合は画像のコピーを返し、共有バッファの変更を防ぐ。
+        
+        Returns:
+            最新画像。画像未取得時は None。
+        """
         with self._frame_lock:
             if self._latest_frame is None:
                 return None
@@ -150,6 +199,14 @@ class ImageStreamDeviceClass:
             return self._latest_frame
 
     def capture_once(self) -> Dict[str, Any]:
+        """カメラ接続を確保し、最新画像をJPEGペイロードとして取得する。
+        
+        Returns:
+            画像メタデータとJPEGバイト列を格納した辞書。
+        
+        Raises:
+            RuntimeError: 接続失敗または規定時間内に画像を取得できない場合。
+        """
         connected: bool = self.connect()
         if not connected:
             raise RuntimeError(str(self._last_error))
@@ -169,6 +226,14 @@ class ImageStreamDeviceClass:
         return self._encode_frame(frame)
 
     def publish_once(self) -> bool:
+        """最新画像をJPEGへ符号化し、EventBusへ1回だけ配信する。
+        
+        Returns:
+            配信に成功した場合は True。
+        
+        Raises:
+            RuntimeError: EventBusまたは最新画像が利用できない場合。
+        """
         if self._event_bus is None:
             raise RuntimeError("EventBus is not set.")
 
@@ -176,6 +241,7 @@ class ImageStreamDeviceClass:
         if frame is None:
             raise RuntimeError("No camera frame is available.")
 
+        # EventBusにはOpenCV配列ではなく、プロセス間転送可能なJPEGバイト列を載せる。
         payload: Dict[str, Any] = self._encode_frame(frame)
         self._event_bus.publish(
             self._topic_name,
@@ -186,6 +252,11 @@ class ImageStreamDeviceClass:
         return True
 
     def get_status(self) -> Dict[str, Any]:
+        """接続、処理ループ、ROI、測定状態をまとめて取得する。
+        
+        Returns:
+            制御対象の状態を格納した辞書。
+        """
         capture_opened: bool = False
         if self._capture is not None:
             capture_opened = bool(self._capture.isOpened())
@@ -206,6 +277,7 @@ class ImageStreamDeviceClass:
         }
 
     def _start_capture_loop(self) -> None:
+        """カメラから最新フレームを取得するデーモンスレッドを開始する。"""
         if self._capture_running:
             return
 
@@ -219,6 +291,7 @@ class ImageStreamDeviceClass:
         self._capture_thread.start()
 
     def _stop_capture_loop(self) -> None:
+        """カメラ取得スレッドへ停止を通知し、終了を待機する。"""
         self._capture_stop_event.set()
 
         if self._capture_thread is not None:
@@ -229,6 +302,7 @@ class ImageStreamDeviceClass:
         self._capture_running = False
 
     def _capture_loop(self) -> None:
+        """カメラフレームを周期取得し、排他制御下で最新画像を更新する。"""
         while not self._capture_stop_event.is_set():
             if self._capture is None:
                 self._last_error = "Camera is not connected."
@@ -243,6 +317,7 @@ class ImageStreamDeviceClass:
 
             frame_time_ns: int = int(time.time() * 1000000000)
 
+            # 画像本体・ID・時刻を同一ロック内で更新し、組み合わせの不整合を防ぐ。
             with self._frame_lock:
                 self._latest_frame_id = self._latest_frame_id + 1
                 self._latest_frame = frame.copy()
@@ -254,6 +329,7 @@ class ImageStreamDeviceClass:
         self._capture_running = False
 
     def _stream_loop(self) -> None:
+        """停止要求まで最新画像を一定周期で配信する。"""
         self._logger.info(
             "<IMAGE STREAM ACTION> publish loop started: topic={}".format(
                 self._topic_name,
@@ -280,6 +356,17 @@ class ImageStreamDeviceClass:
         self,
         frame: np.ndarray,
     ) -> Dict[str, Any]:
+        """OpenCV画像をJPEGへ符号化し、配信用メタデータを付与する。
+        
+        Args:
+            frame: BGR形式のOpenCV画像。
+        
+        Returns:
+            JPEG画像とフレーム識別情報を格納した辞書。
+        
+        Raises:
+            RuntimeError: JPEG符号化に失敗した場合。
+        """
         encode_params: List[int] = [
             int(cv2.IMWRITE_JPEG_QUALITY),
             self._jpeg_quality,

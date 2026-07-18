@@ -1,6 +1,8 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 
+"""粉体レベル監視サーバーを操作し、画像と測定結果を表示するGUIを提供する。"""
+
 import sys
 
 import cv2
@@ -22,9 +24,15 @@ STATUS_REFRESH_MS = 500
 
 
 class ImageLabel(QtWidgets.QLabel):
+    """表示画像上のクリック位置を元画像座標へ変換して通知するQLabel。"""
     image_clicked = QtCore.Signal(int, int)
 
     def __init__(self, parent=None):
+        """クリック座標変換に必要な画像寸法と表示領域を初期化する。
+        
+        Args:
+            parent: 親Qtウィジェット。
+        """
         super().__init__(parent)
         self._source_width = 0
         self._source_height = 0
@@ -34,13 +42,29 @@ class ImageLabel(QtWidgets.QLabel):
         self.setStyleSheet("background-color: black;")
 
     def set_source_size(self, width, height):
+        """元画像の画素寸法を設定する。
+        
+        Args:
+            width: 元画像の幅（px）。
+            height: 元画像の高さ（px）。
+        """
         self._source_width = int(width)
         self._source_height = int(height)
 
     def set_display_rect(self, rect):
+        """アスペクト比維持後の実画像表示領域を設定する。
+        
+        Args:
+            rect: QLabel内でPixmapが実際に描画される矩形。
+        """
         self._display_rect = QtCore.QRect(rect)
 
     def mousePressEvent(self, event):
+        """左クリック位置を元画像座標へ変換して通知する。
+        
+        Args:
+            event: Qtのマウス押下イベント。
+        """
         if event.button() != QtCore.Qt.MouseButton.LeftButton:
             return
 
@@ -71,10 +95,19 @@ class ImageLabel(QtWidgets.QLabel):
 
 
 class ImageSubscriptionThread(QtCore.QThread):
+    """gRPCのイベント購読をGUIスレッドから分離して実行するQThread。"""
     frame_received = QtCore.Signal(object, object)
     subscription_error = QtCore.Signal(str)
 
     def __init__(self, client, topic, logger, parent=None):
+        """画像イベント購読スレッドを初期化する。
+        
+        Args:
+            client: subscribe_eventsを提供するgRPCクライアント。
+            topic: 購読対象の画像トピック名。
+            logger: 購読エラーを記録するロガー。
+            parent: 親Qtオブジェクト。
+        """
         super().__init__(parent)
         self._client = client
         self._topic = topic
@@ -82,9 +115,15 @@ class ImageSubscriptionThread(QtCore.QThread):
         self._running = True
 
     def stop(self):
+        """測定処理を停止する互換API。
+        
+        Returns:
+            測定停止処理を完了した場合は True。
+        """
         self._running = False
 
     def run(self):
+        """画像イベントを継続購読し、復号済みフレームをSignalで通知する。"""
         self._logger.info(
             "<POWDER GUI ACTION> subscribe start: topic={}".format(
                 self._topic,
@@ -129,7 +168,9 @@ class ImageSubscriptionThread(QtCore.QThread):
 
 
 class PowderMonitorGui(QtWidgets.QMainWindow):
+    """ROI設定、Baseline設定、測定操作、および画像表示を行うメインウィンドウ。"""
     def __init__(self):
+        """gRPCクライアント、GUI部品、購読スレッド、および更新タイマーを初期化する。"""
         super().__init__()
 
         self._logger = XLogger(
@@ -164,6 +205,7 @@ class PowderMonitorGui(QtWidgets.QMainWindow):
         self._status_timer.start(STATUS_REFRESH_MS)
 
     def _build_gui(self):
+        """画像表示、測定状態、ROI操作、測定操作の各ウィジェットを構築する。"""
         self.setWindowTitle("Powder Level Monitor")
         self.resize(1100, 850)
 
@@ -228,6 +270,7 @@ class PowderMonitorGui(QtWidgets.QMainWindow):
         main_layout.addWidget(self._roi_label)
 
     def _start_image_subscription(self):
+        """画像購読スレッドを生成し、フレーム受信Signalを接続して開始する。"""
         self._subscription_thread = ImageSubscriptionThread(
             client=self._client,
             topic=IMAGE_TOPIC,
@@ -248,6 +291,7 @@ class PowderMonitorGui(QtWidgets.QMainWindow):
         )
 
     def _request_stream_start(self):
+        """サーバーへ画像配信開始を要求し、失敗時は画面へ状態を表示する。"""
         try:
             result = self._client.start_stream()
             if result:
@@ -261,16 +305,28 @@ class PowderMonitorGui(QtWidgets.QMainWindow):
 
     @QtCore.Slot(object, object)
     def _on_frame_received(self, frame, frame_id):
+        """購読スレッドから受け取った最新画像をGUI側へ保存する。
+        
+        Args:
+            frame: JPEGから復号されたBGR画像。
+            frame_id: 配信側で付与されたフレームID。
+        """
         self._latest_frame = frame
         self._latest_frame_id = frame_id
 
     @QtCore.Slot(str)
     def _on_subscription_error(self, message):
+        """画像購読エラーをステータス表示へ反映する。
+        
+        Args:
+            message: 表示するエラーメッセージ。
+        """
         self._status_label.setText(
             "画像受信エラー: {}".format(message)
         )
 
     def _start_roi_edit(self):
+        """ROI編集状態を開始し、既存の編集中座標を消去する。"""
         self._editing_roi = True
         self._editing_points = []
         self._roi_label.setText(
@@ -278,6 +334,7 @@ class PowderMonitorGui(QtWidgets.QMainWindow):
         )
 
     def _clear_editing_roi(self):
+        """編集中のROI座標を破棄して編集状態を終了する。"""
         self._editing_points = []
         self._roi_label.setText(
             "画面上の未送信ROIをクリアしました"
@@ -285,6 +342,12 @@ class PowderMonitorGui(QtWidgets.QMainWindow):
 
     @QtCore.Slot(int, int)
     def _on_image_click(self, x_value, y_value):
+        """画像クリック座標をROI頂点として最大4点まで追加する。
+        
+        Args:
+            x_value: 元画像座標系のX座標。
+            y_value: 元画像座標系のY座標。
+        """
         if not self._editing_roi:
             return
 
@@ -302,6 +365,7 @@ class PowderMonitorGui(QtWidgets.QMainWindow):
         )
 
     def _send_roi(self):
+        """編集中の4点ROIをサーバーへ送信し、Baseline再設定を促す。"""
         if len(self._editing_points) != 4:
             self._status_label.setText(
                 "ROIは4点指定してから送信してください"
@@ -328,6 +392,7 @@ class PowderMonitorGui(QtWidgets.QMainWindow):
             )
 
     def _set_baseline(self):
+        """サーバーの最新検出位置をBaselineとして設定する。"""
         try:
             if self._client.set_baseline():
                 self._status_label.setText("Baselineを設定しました")
@@ -344,6 +409,7 @@ class PowderMonitorGui(QtWidgets.QMainWindow):
             )
 
     def _clear_baseline(self):
+        """サーバーに保存されたBaselineを消去する。"""
         try:
             self._client.clear_baseline()
             self._status_label.setText("Baselineをクリアしました")
@@ -353,6 +419,7 @@ class PowderMonitorGui(QtWidgets.QMainWindow):
             )
 
     def _start_measurement(self):
+        """サーバーへ連続測定の開始を要求する。"""
         try:
             if self._client.start_measurement():
                 self._status_label.setText("測定を開始しました")
@@ -369,6 +436,7 @@ class PowderMonitorGui(QtWidgets.QMainWindow):
             )
 
     def _stop_measurement(self):
+        """サーバーへ連続測定の停止を要求する。"""
         try:
             self._client.stop_measurement()
             self._status_label.setText("測定を停止しました")
@@ -378,6 +446,7 @@ class PowderMonitorGui(QtWidgets.QMainWindow):
             )
 
     def _refresh_status(self):
+        """サーバー状態と最新測定値を取得し、各ラベルへ反映する。"""
         try:
             status = self._client.get_status()
             measurement = self._client.get_measurement()
@@ -462,6 +531,7 @@ class PowderMonitorGui(QtWidgets.QMainWindow):
             )
 
     def _refresh_image(self):
+        """最新画像へROIと検出線を重ね、表示領域へアスペクト比を維持して描画する。"""
         if self._latest_frame is None:
             return
 
@@ -530,6 +600,7 @@ class PowderMonitorGui(QtWidgets.QMainWindow):
         width = int(rgb.shape[1])
         bytes_per_line = int(rgb.strides[0])
 
+        # NumPyバッファの寿命からQImageを独立させるため、生成直後にcopy()する。
         image = QtGui.QImage(
             rgb.data,
             width,
@@ -564,6 +635,13 @@ class PowderMonitorGui(QtWidgets.QMainWindow):
         self._image_label.setPixmap(scaled_pixmap)
 
     def _draw_roi(self, frame, points, color):
+        """ROI頂点、頂点番号、および頂点間の線を画像へ描画する。
+        
+        Args:
+            frame: 描画対象のBGR画像。
+            points: 描画するROI頂点列。
+            color: OpenCVのBGR色。
+        """
         if not points:
             return
 
@@ -607,6 +685,11 @@ class PowderMonitorGui(QtWidgets.QMainWindow):
             )
 
     def closeEvent(self, event):
+        """ウィンドウ終了時にタイマー、画像配信、購読スレッド、gRPC接続を停止する。
+        
+        Args:
+            event: Qtのウィンドウ終了イベント。
+        """
         self._image_timer.stop()
         self._status_timer.stop()
 
@@ -631,6 +714,7 @@ class PowderMonitorGui(QtWidgets.QMainWindow):
 
 
 def main():
+    """エントリーポイントを実行する。"""
     app = QtWidgets.QApplication(sys.argv)
     window = PowderMonitorGui()
     window.show()

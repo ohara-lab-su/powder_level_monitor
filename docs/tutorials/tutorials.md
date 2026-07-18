@@ -1,317 +1,459 @@
 # チュートリアル
 
-このセクションでは AandD の電子天秤制御 aandd_reader の使い方を段階的に説明します。
+このチュートリアルでは、Powder Level Monitor を使用して、カメラ接続、ROI 設定、Baseline 設定、粉面測定を行うまでの手順を説明します。
 
-A or B のどちらかでお使いください
+## 1. 基本構成
 
-## A. サーバーの起動 (ese774互換)
+gRPC モードでは、サーバー側でカメラ取得と粉面認識を行います。
 
-- A(ese774) or B(gRPC) のどちらかでお使いください
- 
-```python
-#!/usr/bin/env python
-from pathlib import Path
-
-from aandd_reader.config import Config
-from aandd_reader.aandd_reader import AanddReader
-from aandd_reader.server_fastapi.routers import AanddReaderRouter
-from aandd_reader.server_fastapi.spec_ctrl import aandd_reader_api_spec
-
-from ese774_frame.api_server import FastApiServer
-from x_logger.x_logger import XLogger
-
-
-if __name__ == "__main__":
-    HERE = Path(__file__).parent
-
-    Config.load_yaml(HERE / "config_server1.yaml")
-    logger = XLogger(
-        log_level="debug",
-        logger_name=Config.SERVER_LOGGER_NAME,
-        log_mode="rotate",
-        # log_mode="file",
-        log_name="c:/opt/log/aandd.log",
-    )
-    logger.info(f"log_mode = {logger.log_mode}")
-    logger.info(f"log_name = {logger.log_name}")
-    logger.info(f"PORT = {Config.DEVICE_PORT}")
-
-    server = FastApiServer(
-        device_cls=AanddReader,  # 制御クラス
-        router_cls=AanddReaderRouter,  # routerクラス
-        config=Config,
-        api_spec=aandd_reader_api_spec,
-        device_kwargs={
-            "port": Config.DEVICE_PORT
-        },  # COBOTTA制御Classのコンストラクタ引数)
-        logger=logger,
-        logger_name=Config.SERVER_LOGGER_NAME,  # LOGGER_NAME
-        lifespan_msg_prefix="AANDD",
-    )
-    server.run(host=Config.SERVER_IP, port=Config.FASTAPI_PORT)
+```text
+カメラ
+  ↓
+PowderLevelGrpcService
+  ├── ImageStreamDeviceClass
+  └── PowderControlDeviceClass
+  ↓
+grpc_frame
+  ↓
+PowderLevelGrpcClient
+  ├── CLI
+  └── GUI
 ```
 
-## B. サーバーの起動 (Event駆動での利用の場合)
+測定処理はサーバープロセス内で完結します。クライアントへ送信する画像は監視表示用であり、認識処理の入力としてサーバーへ送り返すことはありません。
+
+## 2. 接続設定
+
+サーバーおよびクライアントのサンプルでは、次の設定を使用します。
 
 ```python
-#!/usr/bin/env python3
-from __future__ import annotations
-
-import time
-from concurrent import futures
-from typing import Any, Optional
-
-import grpc
-from grpc import channel_ready_future
-
-from aandd_reader import Config
-from aandd_reader.server_grpc import aandd_reader_server
-
-from x_logger.x_logger import XLogger
-
-
-if __name__ == "__main__":
-    Config.load_yaml("config_server1.yaml")
-
-    # DEVICE_PORT = Config.DEVICE_PORT
-    GRPC_HOST = Config.SERVER_IP
-    GRPC_PORT = Config.GRPC_PORT
-    DEVICE_PORT = "COM4"
-    # GRPC_HOST = "10.170.10.38"
-    # GRPC_PORT = 50051
-    LOG_LEVEL = "INFO"
-
-    LOGGER = XLogger(
-        log_level=LOG_LEVEL,
-        logger_name="JoypadServer",
-    )
-
-    aandd_reader_server(
-        device_port=DEVICE_PORT,
-        grpc_host=GRPC_HOST,
-        grpc_port=GRPC_PORT,
-        logger=LOGGER,
-        log_level=LOG_LEVEL,
-    )
-
+SERVER_IP = "127.0.0.1"
+SERVER_PORT = 50051
+MAX_MESSAGE_MB = 64
 ```
 
-## 基本的なクライアントの使い方(ese774)共通)
-```python
+別のコンピューターから接続する場合は、クライアント側の `SERVER_IP` をサーバーの IP アドレスへ変更します。
 
-#!/usr/bin/env python
-import sys
-import time
-from aandd_reader import AanddReader
+サーバー側は次の設定で全インターフェースに待ち受けます。
+
+```python
+GRPC_HOST = "0.0.0.0"
+GRPC_PORT = 50051
+```
+
+## 3. サーバーを起動する
+
+`run_server.py` を実行します。
+
+```bash
+python examples/run_server.py
+```
+
+サーバーでは、次の順序で初期化されます。
+
+1. `PowderLevelGrpcService` を生成
+2. `EventBus` を生成
+3. `create_grpc_server()` で gRPC サーバーを生成
+4. `0.0.0.0:50051` で待ち受け
+5. カメラ接続
+6. 画像取得ループと粉面処理ループを開始
+
+カメラ接続に失敗した場合は、`get_status()` の内容を伴う `RuntimeError` で起動を中止します。
+
+## 4. サーバー状態を確認する
+
+`status_client.py` を実行します。
+
+```bash
+python examples/status_client.py
+```
+
+クライアントの基本形は次のとおりです。
+
+```python
+from powder_level_monitor.server_grpc import PowderLevelGrpcClient
 from x_logger import XLogger
 
 
-if __name__ == "__main__":
+logger = XLogger(
+    log_level="debug",
+    logger_name="status_client",
+)
 
-    log_mode = "file"
-    logger = XLogger(
-        log_level="info",
-        log_mode=log_mode,
-        log_name="aandd.log",
-        logger_name="aandd_reader",
-    )
+client = PowderLevelGrpcClient(
+    server_ip="127.0.0.1",
+    grpc_port=50051,
+    timeout_sec=5.0,
+    logger=logger,
+    max_message_mb=64,
+)
 
-    # COMポートを選ぶ
-    # aandd_reader = AanddReader(port="COM4", logger=logger)
-    aandd_reader = AanddReader(port="COM3", logger=logger)
-
-    # Reset
-    aandd_reader.reset()
-    time.sleep(0.5)
-    
-    # 測定
-    ret = aandd_reader.meas()
-    if ret is False:
-        logger.error("Error measuring.")
-        logger.error(ret)
-        sys.exit(1)
-        
-    logger.info(ret)
-
-```
-
-## 基本的なクライアントの使い方(gRPC) sync版
-
-実質的には使い方が同じ(呼び出すクラス名が一つだけ異なる)
-
-```python
-#!/usr/bin/env python
-from __future__ import annotations
-
-import time
-import logging
-from pathlib import Path
-
-# meas_grpc.py
-
-from aandd_reader import Config
-from aandd_reader.server_grpc import AanddReaderGrpcClient
-from x_logger import XLogger
-
-# logging.basicConfig(level="INFO")
-# logger = logging.getLogger("aandd_meas_grpc")
-
-
-def main() -> None:
-    HERE = Path(__file__).parent
-    Config.load_yaml(HERE / "config_server1.yaml")
-
-    log_level = "info"
-
-    logger = XLogger(
-        log_level=log_level,
-        logger_name=Config.CLIENT_LOGGER_NAME,
-    )
-
-    client = AanddReaderGrpcClient(
-        config=Config,
-        # server_ip="10.170.10.38",
-        # server_port=50051,  # gRPC
-        # timeout_sec=0.5,  # 入力しなければ、None がデフォでNonだと 0.5 になる
-        logger=logger,
-        log_level=log_level,
-    )
-
-    # client.reset()
-    # time.sleep(0.5)
-
-    ret = client.meas()
-    print(ret)
-
+try:
+    status = client.get_status()
+    print(status)
+finally:
     client.close()
-
-
-if __name__ == "__main__":
-    main()
 ```
 
-## 基本的なクライアントの使い方(gRPC) async版
+`get_status()` の `state` は、おおむね次の状態を返します。
 
-ese774版と使い方が同じ(呼び出すクラス名が一つだけ異なる)
+| 状態 | 意味 |
+|---|---|
+| `DISCONNECTED` | カメラに接続していない |
+| `READY_NO_ROI` | 接続済みだが ROI が未設定 |
+| `READY_NO_BASELINE` | ROI 設定済みだが Baseline が未設定 |
+| `READY` | 測定開始可能 |
+| `MEASURING` | 測定中 |
+
+## 5. ROI を設定する
+
+### 5.1 ROI ファイルを用意する
+
+`set_roi_client.py` は、同じディレクトリの `roi.json` を読み込みます。
+
+```json
+{
+  "points": [
+    [100, 80],
+    [540, 80],
+    [540, 430],
+    [100, 430]
+  ]
+}
+```
+
+4点は次の順序で指定します。
+
+```text
+左上 → 右上 → 右下 → 左下
+```
+
+自己交差する四角形、画像範囲外の点、重複点は使用できません。
+
+### 5.2 ROI を送信する
+
+```bash
+python examples/set_roi_client.py
+```
+
+実行される処理は次のとおりです。
 
 ```python
-#!/usr/bin/env python
-from __future__ import annotations
-import asyncio
-
-import time
-import logging
-from pathlib import Path
-
-# meas_grpc.py
-
-from aandd_reader import Config
-
-# from aandd_reader.server_grpc import AanddReaderGrpcClient
-from aandd_reader.server_grpc import AsyncAanddReaderGrpcClient
-from x_logger import XLogger
-
-# logging.basicConfig(level="INFO")
-# logger = logging.getLogger("aandd_meas_grpc")
-
-
-async def main() -> None:
-    HERE = Path(__file__).parent
-    Config.load_yaml(HERE / "config_server1.yaml")
-
-    log_level = "info"
-
-    logger = XLogger(
-        log_level=log_level,
-        logger_name=Config.CLIENT_LOGGER_NAME,
-    )
-
-    client = AsyncAanddReaderGrpcClient(
-        config=Config,
-        # server_ip="10.170.10.38",
-        # server_port=50051,  # gRPC
-        # timeout_sec=0.5,  # 入力しなければ、None がデフォでNonだと 0.5 になる
-        logger=logger,
-        log_level=log_level,
-    )
-
-    # client.reset()
-    # time.sleep(0.5)
-
-    ret = await client.meas()
-    print(ret)
-
-    client.close()
-
-
-if __name__ == "__main__":
-    asyncio.run(main())
+client.set_roi_points(roi_data["points"])
 ```
 
+ROI を変更すると、既存の Baseline は無効になります。ROI 変更後は Baseline を再設定してください。
 
-## イベント起動
+### 5.3 ROI を確認する
+
+```bash
+python examples/get_roi_client.py
+```
+
+内部では次を呼び出します。
 
 ```python
-#!/usr/bin/env python3
-# -*- coding: utf-8 -*-
-
-from __future__ import annotations
-
-import time
-from typing import Any
-
-from aandd_reader import Config
-from aandd_reader.server_grpc import AanddReaderGrpcClient
-from x_logger import XLogger
-
-
-def on_weight_event(payload: Any) -> None:
-    print("=== EVENT RECEIVED ===")
-    print(payload)
-    print("=======================")
-
-
-def main() -> None:
-    Config.load_yaml("config_server1.yaml")
-
-    log_level = "info"
-
-    logger = XLogger(
-        log_level=log_level,
-        logger_name="aandd_reader",
-    )
-
-    client = AanddReaderGrpcClient(
-        config=Config,
-        logger=logger,
-        log_level=log_level,
-    )
-
-    # --- Event 測定の準備（順番はクライアント内部に閉じ込める） ---
-    client.prepare_event_measurement(
-        topic="weight_threshold",
-        threshold_g=10.0,  # 閾値g
-        above=True,
-        once=True,
-        # trigger_mode="mean",
-        trigger_mode="raw",
-        # trigger_window=3,
-        # trigger_min_samples=3,
-    )
-
-    # --- 1イベント待つ ---
-    event = client.wait_event()
-    on_weight_event(event)
-
-    # --- 後始末 ---
-    client.stream_stop()
-    time.sleep(0.1)
-
-
-if __name__ == "__main__":
-    main()
-
+client.get_roi_points()
 ```
+
+## 6. Baseline を設定する
+
+ROI 設定後、現在検出されている粉面を Baseline として登録します。
+
+```bash
+python examples/set_baseline_client.py
+```
+
+内部では次を呼び出します。
+
+```python
+result = client.set_baseline()
+```
+
+粉面を検出できていない場合、`False` が返ります。失敗理由は次で確認できます。
+
+```python
+measurement = client.get_measurement()
+print(measurement.get("last_error"))
+```
+
+Baseline の値を確認するには次を実行します。
+
+```bash
+python examples/get_baseline_client.py
+```
+
+## 7. 測定を開始する
+
+Baseline 設定後に測定を開始します。
+
+```bash
+python examples/start_measurement_client.py
+```
+
+内部では次を呼び出します。
+
+```python
+result = client.start_measurement()
+```
+
+開始できなかった場合は、次で理由を確認できます。
+
+```python
+status = client.get_status()
+print(status.get("last_error"))
+```
+
+測定開始には、少なくとも次の条件が必要です。
+
+- カメラに接続している
+- ROI が4点設定されている
+- Baseline が設定されている
+
+## 8. 測定結果を取得する
+
+```bash
+python examples/measurement_client.py
+```
+
+内部では次を呼び出します。
+
+```python
+measurement = client.get_measurement()
+```
+
+代表的な結果は次の形式です。
+
+```json
+{
+  "measuring": true,
+  "current_detected": true,
+  "baseline_set": true,
+  "baseline_detected": true,
+  "level_y": 310.4,
+  "baseline_level_y": 280.2,
+  "decrease_px": 30.2,
+  "decrease_mm": 4.19,
+  "decrease_ratio": 0.0419,
+  "last_error": null
+}
+```
+
+`level_y` と `baseline_level_y` は、透視変換後の縦方向座標です。画像へ線を描画するときは、元画像座標へ逆変換済みの次の値を使用します。
+
+- `line_left`
+- `line_right`
+- `baseline_line_left`
+- `baseline_line_right`
+
+## 9. GUI で操作する
+
+サーバーを起動した状態で、次を実行します。
+
+```bash
+python examples/monitor_gui.py
+```
+
+GUI 起動時には次の処理が行われます。
+
+1. `camera.frame` の EventBus 購読を開始
+2. `start_stream()` を呼び出す
+3. JPEG 画像を受信して表示
+4. `get_status()` と `get_measurement()` を定期取得
+
+### ROI 設定
+
+1. 「ROI設定開始」を押す
+2. 画像上で左上、右上、右下、左下の順に4点をクリック
+3. 「ROI送信」を押す
+4. Baseline を再設定する
+
+表示色は次のとおりです。
+
+| 表示 | 色 |
+|---|---|
+| サーバー登録済み ROI | 緑 |
+| 編集中 ROI | 黄 |
+| Baseline | 赤 |
+| 現在粉面 | 青 |
+
+### GUI 終了時
+
+GUI は終了時に次を実行します。
+
+1. `stop_stream()` を呼び出す
+2. EventBus 購読スレッドを停止
+3. gRPC クライアントを閉じる
+
+これにより、GUI を使用していない間は画像のネットワーク配信が停止します。
+
+## 10. 測定を停止する
+
+停止用クライアントから次を呼び出します。
+
+```python
+client.stop_measurement()
+```
+
+```bash
+python examples/stop_measurement_client.py
+```
+
+停止後も ROI と Baseline は保持されます。
+
+## 11. Baseline と ROI を解除する
+
+Baseline を解除する場合は次を呼び出します。
+
+```python
+client.clear_baseline()
+```
+
+ROI を解除する場合は次を呼び出します。
+
+```python
+client.clear_roi_points()
+```
+
+ROI を解除すると、測定は停止し、Baseline も無効になります。
+
+## 12. 検出パラメーター
+
+検出パラメーターは `get_detector_params()` で取得し、`set_detector_params()` で変更できます。
+
+```python
+params = client.get_detector_params()
+print(params)
+
+client.set_detector_params(
+    {
+        "mode": 0,
+        "blur": 5,
+        "open_kernel": 3,
+        "close_kernel": 5,
+        "row_ratio_threshold": 0.2,
+        "stable_rows": 4,
+        "min_area": 500,
+        "margin_x_ratio": 0.05,
+        "margin_y_ratio": 0.05,
+        "measure_height_mm": 100.0,
+    }
+)
+```
+
+主な項目は次のとおりです。
+
+| 項目 | 内容 |
+|---|---|
+| `mode` | 二値化方式。0～3 |
+| `manual_threshold` | 手動二値化しきい値。0～255 |
+| `blur` | Gaussian Blur のカーネルサイズ |
+| `open_kernel` | Opening のカーネルサイズ |
+| `close_kernel` | Closing のカーネルサイズ |
+| `row_ratio_threshold` | 行方向の粉体占有率しきい値 |
+| `stable_rows` | 縦方向の連続画素確認数 |
+| `min_area` | マスクの最小面積 |
+| `margin_x_ratio` | 補正画像左右の除外率 |
+| `margin_y_ratio` | 補正画像上下の除外率 |
+| `measure_height_mm` | 補正画像全高に対応する実長 |
+
+偶数の `blur`、`open_kernel`、`close_kernel` は、内部で次の奇数へ補正されます。
+
+## 13. ローカルで画像取得だけを使う
+
+`ImageStreamDeviceClass` は、gRPC を使わず直接利用できます。
+
+```python
+import time
+
+from powder_level_monitor.image_stream_ctrl import ImageStreamDeviceClass
+
+
+image_stream = ImageStreamDeviceClass(
+    camera_id=0,
+)
+
+if not image_stream.connect():
+    raise RuntimeError(str(image_stream.get_status()))
+
+try:
+    while True:
+        frame = image_stream.get_latest_frame()
+
+        if frame is not None:
+            print(frame.shape)
+            break
+
+        time.sleep(0.01)
+finally:
+    image_stream.disconnect()
+```
+
+## 14. ローカルで粉面測定を使う
+
+`PowderControlDeviceClass` へ `ImageStreamDeviceClass` を渡すことで、gRPC を使わずに測定できます。
+
+```python
+from powder_level_monitor.image_stream_ctrl import ImageStreamDeviceClass
+from powder_level_monitor.powder_monitor_ctrl import PowderControlDeviceClass
+
+
+image_stream = ImageStreamDeviceClass(
+    camera_id=0,
+)
+
+monitor = PowderControlDeviceClass(
+    image_source=image_stream,
+    measurement_interval_sec=0.1,
+)
+
+if not monitor.connect():
+    raise RuntimeError(str(monitor.get_status()))
+
+try:
+    monitor.set_roi_points(
+        [
+            [100, 80],
+            [540, 80],
+            [540, 430],
+            [100, 430],
+        ]
+    )
+
+    if not monitor.set_baseline():
+        raise RuntimeError(
+            str(monitor.get_measurement().get("last_error"))
+        )
+
+    if not monitor.start_measurement():
+        raise RuntimeError(
+            str(monitor.get_status().get("last_error"))
+        )
+
+    measurement = monitor.get_measurement()
+    print(measurement)
+finally:
+    monitor.disconnect()
+```
+
+ローカル利用では `PowderLevelGrpcService`、`PowderLevelGrpcClient`、EventBus は不要です。
+
+## 15. 推奨操作順序
+
+```text
+1. サーバー起動
+2. 状態確認
+3. ROI設定
+4. ROI確認
+5. Baseline設定
+6. Baseline確認
+7. 測定開始
+8. 測定結果取得
+9. 測定停止
+```
+
+GUI を使用する場合は、ROI 設定から測定開始までを1つの画面で操作できます。
+
 
 ---
 ## 作者

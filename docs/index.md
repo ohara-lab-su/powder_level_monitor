@@ -1,8 +1,19 @@
 # Powder Level Monitor
+view on [github](https://github.com/ohara-lab-su/powder_level_monitor/) / [ohara-lab-su (doc)](https://ohara-lab-su.github.io/)
 
 Powder Level Monitor は、カメラ画像から粉体表面の位置を検出し、基準面（Baseline）からの変化量を測定する Python ライブラリです。
 
 画像取得と粉面測定のコア機能は gRPC に依存せず、ローカル処理として利用できます。リモート運用では、`grpc_frame` を利用した gRPC サービスとクライアントを使用します。
+
+---
+```{toctree}
+:maxdepth: 2
+:caption: Contents:
+
+api/modules
+tutorials/index
+```
+---
 
 ## 主な機能
 
