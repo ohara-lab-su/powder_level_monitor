@@ -1151,3 +1151,224 @@ class PowderControlDeviceClass:
             odd_value = odd_value + 1
 
         return odd_value
+
+
+def main() -> None:
+    """ローカルカメラを使用して粉体表面検出を対話的に実行する。
+
+    OpenCVのプレビュー画面上でROIを4点指定し、Baseline設定後に
+    粉体表面の変位量を継続表示する。ROIの点は、左上、右上、
+    右下、左下の順に指定する。
+
+    Keyboard Controls:
+        左クリック: ROIの頂点を1点追加する。
+        B: 現在の粉体表面をBaselineとして設定する。
+        S: 連続測定を開始または停止する。
+        R: ROIとBaselineを消去してROI指定をやり直す。
+        QまたはEsc: ローカル測定を終了する。
+    """
+    camera_id: int = 0
+    window_name: str = "Powder Monitor"
+
+    image_source = ImageStreamDeviceClass(
+        camera_id=camera_id,
+    )
+    powder_monitor = PowderControlDeviceClass(
+        image_source=image_source,
+    )
+
+    selected_points: List[List[int]] = []
+
+    def on_mouse(
+        event: int,
+        x: int,
+        y: int,
+        flags: int,
+        param: Any,
+    ) -> None:
+        """プレビュー画面上の左クリックをROI座標として記録する。
+
+        Args:
+            event: OpenCVから通知されるマウスイベント種別。
+            x: クリック位置のX座標。
+            y: クリック位置のY座標。
+            flags: クリック時の修飾キーおよびボタン状態。
+            param: ``cv2.setMouseCallback()`` から渡される任意データ。
+        """
+        del flags
+        del param
+
+        if event != cv2.EVENT_LBUTTONDOWN:
+            return
+
+        if len(selected_points) >= 4:
+            return
+
+        selected_points.append([int(x), int(y)])
+
+        if len(selected_points) == 4:
+            powder_monitor.set_roi_points(selected_points)
+
+    connected: bool = powder_monitor.connect()
+    if not connected:
+        status: Dict[str, Any] = powder_monitor.get_status()
+        raise RuntimeError(
+            "Failed to connect powder monitor: {}".format(
+                status.get("last_error"),
+            )
+        )
+
+    cv2.namedWindow(window_name)
+    cv2.setMouseCallback(window_name, on_mouse)
+
+    try:
+        while True:
+            frame = image_source.get_latest_frame()
+
+            if frame is None:
+                time.sleep(0.01)
+                continue
+
+            display_frame = frame.copy()
+            measurement: Dict[str, Any] = powder_monitor.get_measurement()
+
+            # ROIは透視変換の対応順が分かるよう、点番号と輪郭を重ねて表示する。
+            for index, point in enumerate(selected_points):
+                point_tuple = (int(point[0]), int(point[1]))
+                cv2.circle(
+                    display_frame,
+                    point_tuple,
+                    6,
+                    (0, 255, 255),
+                    -1,
+                )
+                cv2.putText(
+                    display_frame,
+                    str(index + 1),
+                    (point_tuple[0] + 8, point_tuple[1] - 8),
+                    cv2.FONT_HERSHEY_SIMPLEX,
+                    0.6,
+                    (0, 255, 255),
+                    2,
+                )
+
+            if len(selected_points) >= 2:
+                for index in range(1, len(selected_points)):
+                    previous_point = selected_points[index - 1]
+                    current_point = selected_points[index]
+                    cv2.line(
+                        display_frame,
+                        (int(previous_point[0]), int(previous_point[1])),
+                        (int(current_point[0]), int(current_point[1])),
+                        (0, 255, 255),
+                        2,
+                    )
+
+            if len(selected_points) == 4:
+                first_point = selected_points[0]
+                last_point = selected_points[3]
+                cv2.line(
+                    display_frame,
+                    (int(last_point[0]), int(last_point[1])),
+                    (int(first_point[0]), int(first_point[1])),
+                    (0, 255, 255),
+                    2,
+                )
+
+            # 検出線とBaseline線は元画像座標へ逆変換済みの座標を使用する。
+            line_left = measurement.get("line_left")
+            line_right = measurement.get("line_right")
+            if line_left is not None and line_right is not None:
+                cv2.line(
+                    display_frame,
+                    tuple(line_left),
+                    tuple(line_right),
+                    (0, 255, 0),
+                    3,
+                )
+
+            baseline_line_left = measurement.get("baseline_line_left")
+            baseline_line_right = measurement.get("baseline_line_right")
+            if baseline_line_left is not None:
+                if baseline_line_right is not None:
+                    cv2.line(
+                        display_frame,
+                        tuple(baseline_line_left),
+                        tuple(baseline_line_right),
+                        (255, 0, 0),
+                        2,
+                    )
+
+            detected: bool = bool(measurement.get("detected"))
+            measuring: bool = bool(measurement.get("measuring"))
+            decrease_mm = measurement.get("decrease_mm")
+
+            status_text: str = "detected={} measuring={}".format(
+                detected,
+                measuring,
+            )
+            cv2.putText(
+                display_frame,
+                status_text,
+                (20, 30),
+                cv2.FONT_HERSHEY_SIMPLEX,
+                0.7,
+                (255, 255, 255),
+                2,
+            )
+
+            if decrease_mm is not None:
+                decrease_text: str = "decrease={:.3f} mm".format(
+                    float(decrease_mm),
+                )
+                cv2.putText(
+                    display_frame,
+                    decrease_text,
+                    (20, 60),
+                    cv2.FONT_HERSHEY_SIMPLEX,
+                    0.7,
+                    (255, 255, 255),
+                    2,
+                )
+
+            operation_text: str = (
+                "Click ROI: TL, TR, BR, BL | "
+                "B: baseline | S: start/stop | R: reset | Q: quit"
+            )
+            cv2.putText(
+                display_frame,
+                operation_text,
+                (20, display_frame.shape[0] - 20),
+                cv2.FONT_HERSHEY_SIMPLEX,
+                0.5,
+                (255, 255, 255),
+                1,
+            )
+
+            cv2.imshow(window_name, display_frame)
+            key: int = cv2.waitKey(1) & 0xFF
+
+            if key == ord("q") or key == 27:
+                break
+
+            if key == ord("r"):
+                powder_monitor.clear_roi_points()
+                selected_points.clear()
+                continue
+
+            if key == ord("b"):
+                powder_monitor.set_baseline()
+                continue
+
+            if key == ord("s"):
+                if powder_monitor.is_measuring():
+                    powder_monitor.stop_measurement()
+                else:
+                    powder_monitor.start_measurement()
+    finally:
+        powder_monitor.disconnect()
+        cv2.destroyAllWindows()
+
+
+if __name__ == "__main__":
+    main()
