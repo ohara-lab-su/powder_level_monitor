@@ -1,44 +1,61 @@
-# Powder Level Monitor (grpc_frame)
+# Powder Level Monitor
 
-粉体表面をサーバー側で継続認識し、GUIへカメラ画像をgRPC streamingで転送する構成です。
+粉体表面をサーバー側で検出し、画像監視・ROI設定・baseline設定・測定開始停止をgRPC経由で操作するシステムです。
 
-## 通信経路
+## 通信構成
 
-画像転送は次の実経路を通ります。
-
-```text
-ImageStreamDeviceClass._stream_loop()
-  -> EventBus.publish("camera.frame", payload)
-  -> /frame.Events/Subscribe
-  -> PowderLevelGrpcClient.subscribe(topic="camera.frame")
-  -> GUIでJPEG bytesをOpenCV画像へdecode
-```
-
-ROI、baseline、測定開始・停止、状態・測定値は `grpc_frame` の完全透過呼び出しです。
+制御メソッドは `grpc_frame` の完全透過呼び出しを使用します。
 
 ```text
-PowderLevelGrpcClient.start_measurement()
-  -> /ctrl.Control/Call
-  -> PowderLevelDeviceClass.start_measurement()
+GUI / CLI
+    -> /ctrl.Control/Call
+    -> PowderLevelDeviceClass の public メソッド
 ```
 
-専用proto、FastAPI、Base64画像APIは使用しません。
+GUI画像は `grpc_frame` のイベントストリームを使用します。
 
-## 起動
+```text
+ImageStreamDeviceClass
+    -> EventBus.publish("camera.frame", payload)
+    -> /frame.Events/Subscribe
+    -> monitor_gui.py
+```
 
-サーバー:
+## サーバー内部の測定経路
+
+測定処理はgRPCを経由しません。
+
+```text
+カメラ
+    -> ImageStreamDeviceClass._latest_frame
+    -> PowderControlDeviceClass.process_once()
+```
+
+`PowderControlDeviceClass` は同一プロセス内で `get_latest_frame()` を直接呼びます。サーバー自身が画像をgRPCで送信して受信し直す処理はありません。
+
+## 画像配信の開始と停止
+
+`run_server.py` 起動時には、カメラ取得とサーバー内部の認識ループだけを開始します。画像publishは開始しません。
+
+`monitor_gui.py` は次の順序で動作します。
+
+1. `camera.frame` のgRPC購読スレッドを開始
+2. `start_stream()` を透過RPCで呼び出す
+3. サーバーがJPEG画像のpublishを開始
+4. GUI終了時に `stop_stream()` を透過RPCで呼び出す
+5. gRPCクライアントを閉じる
+
+したがって、GUIを起動していない通常状態では、サーバーはネットワークへ画像を送信し続けません。
+
+## GUI
+
+GUIはQtのPyQt5で実装しています。`tkinter` は使用しません。
 
 ```bash
-python run_server.py
+python examples/monitor_gui.py
 ```
 
-GUI:
-
-```bash
-python example/monitor_gui.py
-```
-
-GUIは通常時には画像モニターです。必要時に同じ画面で次を操作します。
+主な操作:
 
 - ROI設定開始
 - ROI送信
@@ -48,32 +65,35 @@ GUIは通常時には画像モニターです。必要時に同じ画面で次�
 - 測定開始
 - 測定停止
 
-`画面ROIクリア` は未送信の編集点だけを消し、サーバー側ROIには影響しません。
+「画面ROIクリア」は未送信のクリック点だけを消します。サーバーに登録済みのROIは変更しません。
 
-## 独立クライアント
+## サーバー
 
-各ファイルは引数で動作を切り替えず、1ファイル1操作です。
-
-```text
-start_measurement_client.py
-stop_measurement_client.py
-status_client.py
-measurement_client.py
-set_baseline_client.py
-get_baseline_client.py
-clear_baseline_client.py
-set_roi_client.py
-get_roi_client.py
-clear_roi_client.py
+```bash
+python run_server.py
 ```
 
-`set_roi_client.py` は同じディレクトリの `roi.json` を読みます。
+## CLI
 
-## grpc_frame
+各操作は独立したプログラムです。引数による動作切り替えは行いません。
 
-サーバーは `create_grpc_server()` を使い、同じポートへ以下の2サービスを登録します。
+```text
+examples/start_measurement_client.py
+examples/stop_measurement_client.py
+examples/status_client.py
+examples/measurement_client.py
+examples/set_baseline_client.py
+examples/get_baseline_client.py
+examples/clear_baseline_client.py
+examples/set_roi_client.py
+examples/get_roi_client.py
+examples/clear_roi_client.py
+```
 
-- `/ctrl.Control/Describe`, `/ctrl.Control/Call`
-- `/frame.Events/Subscribe`
+## 依存関係
 
-クライアントはN10W02の例と同様に `GrpcClient` を継承した薄いクラスだけを使います。
+```bash
+pip install -r requirements.txt
+```
+
+PythonソースはPython 3.6の構文で検査しています。依存パッケージはPythonバージョン別の条件を `requirements.txt` に記載しています。

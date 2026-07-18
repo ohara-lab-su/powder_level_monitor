@@ -19,9 +19,13 @@ class ImageStreamDeviceClass:
         logger: Optional[Any] = None,
     ) -> None:
         if logger is None:
-            import logging
-            logging.basicConfig(level=logging.INFO)
-            logger = logging.getLogger(__name__)
+            from x_logger import XLogger
+
+            logger = XLogger(
+                log_level="debug",
+                logger_name=self.__class__.__name__,
+            )
+
         self._logger = logger
         self._camera_id: int = int(camera_id)
         self._topic_name: str = str(topic_name)
@@ -53,7 +57,12 @@ class ImageStreamDeviceClass:
         self._event_bus = event_bus
 
     def connect(self) -> bool:
-        self._logger.info("<IMAGE STREAM ACTION> connect: camera_id={}".format(self._camera_id))
+        self._logger.info(
+            "<IMAGE STREAM ACTION> connect: camera_id={}".format(
+                self._camera_id,
+            )
+        )
+
         if self._capture is not None:
             if self._capture.isOpened():
                 self._start_capture_loop()
@@ -63,7 +72,9 @@ class ImageStreamDeviceClass:
 
         if not self._capture.isOpened():
             self._last_error = "Failed to open camera."
-            self._logger.error("<IMAGE STREAM ACTION> failed to open camera")
+            self._logger.error(
+                "<IMAGE STREAM ACTION> failed to open camera"
+            )
             self._capture = None
             return False
 
@@ -89,6 +100,7 @@ class ImageStreamDeviceClass:
 
     def start_stream(self) -> bool:
         self._logger.info("<IMAGE STREAM ACTION> start_stream")
+
         if self._event_bus is None:
             raise RuntimeError("EventBus is not set.")
 
@@ -110,6 +122,9 @@ class ImageStreamDeviceClass:
         return True
 
     def stop_stream(self) -> bool:
+        if not self._stream_running:
+            return True
+
         self._logger.info("<IMAGE STREAM ACTION> stop_stream")
         self._stream_stop_event.set()
 
@@ -157,7 +172,11 @@ class ImageStreamDeviceClass:
         if self._event_bus is None:
             raise RuntimeError("EventBus is not set.")
 
-        payload: Dict[str, Any] = self.capture_once()
+        frame: Optional[np.ndarray] = self.get_latest_frame()
+        if frame is None:
+            raise RuntimeError("No camera frame is available.")
+
+        payload: Dict[str, Any] = self._encode_frame(frame)
         self._event_bus.publish(
             self._topic_name,
             payload,
@@ -235,15 +254,27 @@ class ImageStreamDeviceClass:
         self._capture_running = False
 
     def _stream_loop(self) -> None:
+        self._logger.info(
+            "<IMAGE STREAM ACTION> publish loop started: topic={}".format(
+                self._topic_name,
+            )
+        )
+
         while not self._stream_stop_event.is_set():
             try:
                 self.publish_once()
             except Exception as exc:
                 self._last_error = str(exc)
+                self._logger.error(
+                    "<IMAGE STREAM ACTION> publish failed: {}".format(
+                        exc,
+                    )
+                )
 
-            time.sleep(self._interval_sec)
+            self._stream_stop_event.wait(self._interval_sec)
 
         self._stream_running = False
+        self._logger.info("<IMAGE STREAM ACTION> publish loop stopped")
 
     def _encode_frame(
         self,

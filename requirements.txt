@@ -1,8 +1,11 @@
-opencv-python==4.8.1.78
-numpy==1.19.5
-Pillow==8.4.0
-grpcio==1.48.2
+opencv-python>=4.8,<5
+numpy==1.19.5; python_version < "3.10"
+numpy>=1.26,<3; python_version >= "3.10"
+PyQt5>=5.15.4,<5.16; python_version < "3.8"
+PyQt5>=5.15.10,<5.16; python_version >= "3.8"
+grpcio==1.48.2; python_version < "3.11"
+grpcio>=1.60,<2; python_version >= "3.11"
 protobuf==3.20.3
 x_logger
 grpc_frame
-dataclasses==0.8
+dataclasses==0.8; python_version < "3.7"

@@ -1,29 +1,140 @@
-import threading
-import tkinter as tk
-from typing import Any, Dict, List, Optional
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+
+import sys
 
 import cv2
 import numpy as np
-from PIL import Image
-from PIL import ImageTk
+from PyQt5 import QtCore
+from PyQt5 import QtGui
+from PyQt5 import QtWidgets
+
 from power_level_monitor.grpc_client import PowderLevelGrpcClient
 from x_logger import XLogger
 
 
 SERVER_IP = "127.0.0.1"
 SERVER_PORT = 50051
-IMAGE_TOPIC = "camera.frame"
 MAX_MESSAGE_MB = 64
-STATUS_REFRESH_MS = 500
+IMAGE_TOPIC = "camera.frame"
 IMAGE_REFRESH_MS = 50
+STATUS_REFRESH_MS = 500
 
 
-class PowderMonitorGui:
-    def __init__(self, root):
-        self._root = root
+class ImageLabel(QtWidgets.QLabel):
+    image_clicked = QtCore.pyqtSignal(int, int)
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self._source_width = 0
+        self._source_height = 0
+        self._display_rect = QtCore.QRect()
+        self.setMinimumSize(640, 480)
+        self.setAlignment(QtCore.Qt.AlignCenter)
+        self.setStyleSheet("background-color: black;")
+
+    def set_source_size(self, width, height):
+        self._source_width = int(width)
+        self._source_height = int(height)
+
+    def set_display_rect(self, rect):
+        self._display_rect = QtCore.QRect(rect)
+
+    def mousePressEvent(self, event):
+        if event.button() != QtCore.Qt.LeftButton:
+            return
+
+        if self._source_width <= 0:
+            return
+
+        if self._source_height <= 0:
+            return
+
+        if not self._display_rect.contains(event.pos()):
+            return
+
+        x_value = event.x() - self._display_rect.x()
+        y_value = event.y() - self._display_rect.y()
+
+        source_x = int(
+            x_value
+            * self._source_width
+            / float(self._display_rect.width())
+        )
+        source_y = int(
+            y_value
+            * self._source_height
+            / float(self._display_rect.height())
+        )
+
+        self.image_clicked.emit(source_x, source_y)
+
+
+class ImageSubscriptionThread(QtCore.QThread):
+    frame_received = QtCore.pyqtSignal(object, object)
+    subscription_error = QtCore.pyqtSignal(str)
+
+    def __init__(self, client, topic, logger, parent=None):
+        super().__init__(parent)
+        self._client = client
+        self._topic = topic
+        self._logger = logger
+        self._running = True
+
+    def stop(self):
+        self._running = False
+
+    def run(self):
+        self._logger.info(
+            "<POWDER GUI ACTION> subscribe start: topic={}".format(
+                self._topic,
+            )
+        )
+
+        try:
+            for payload in self._client.subscribe(topic=self._topic):
+                if not self._running:
+                    break
+
+                image_bytes = payload.get("image")
+                if image_bytes is None:
+                    continue
+
+                encoded = np.frombuffer(
+                    image_bytes,
+                    dtype=np.uint8,
+                )
+                frame = cv2.imdecode(
+                    encoded,
+                    cv2.IMREAD_COLOR,
+                )
+
+                if frame is None:
+                    continue
+
+                self.frame_received.emit(
+                    frame,
+                    payload.get("frame_id"),
+                )
+        except Exception as exc:
+            if self._running:
+                self._logger.error(
+                    "<POWDER GUI ACTION> subscribe failed: {}".format(
+                        exc,
+                    )
+                )
+                self.subscription_error.emit(str(exc))
+
+        self._logger.info("<POWDER GUI ACTION> subscribe stopped")
+
+
+class PowderMonitorGui(QtWidgets.QMainWindow):
+    def __init__(self):
+        super().__init__()
+
         self._logger = XLogger(
             log_level="debug",
-            logger_name="PowderMonitorGui",
+            logger_name=self.__class__.__name__,
         )
         self._client = PowderLevelGrpcClient(
             server_ip=SERVER_IP,
@@ -33,146 +144,144 @@ class PowderMonitorGui:
             max_message_mb=MAX_MESSAGE_MB,
         )
 
-        self._frame_lock = threading.Lock()
         self._latest_frame = None
         self._latest_frame_id = None
-        self._subscription_thread = None
-        self._subscription_running = True
-
-        self._photo = None
-        self._source_width = 1
-        self._source_height = 1
-        self._display_width = 960
-        self._display_height = 720
-        self._editing_roi = False
-        self._editing_points = []
         self._server_roi_points = []
-
-        self._status_var = tk.StringVar(value="接続中")
-        self._measurement_var = tk.StringVar(value="")
-        self._roi_var = tk.StringVar(value="ROI: 未取得")
+        self._editing_points = []
+        self._editing_roi = False
+        self._subscription_thread = None
 
         self._build_gui()
-        self._start_subscription()
-        self._root.after(IMAGE_REFRESH_MS, self._refresh_image)
-        self._root.after(STATUS_REFRESH_MS, self._refresh_status)
-        self._root.protocol("WM_DELETE_WINDOW", self._close)
+        self._start_image_subscription()
+
+        self._image_timer = QtCore.QTimer(self)
+        self._image_timer.timeout.connect(self._refresh_image)
+        self._image_timer.start(IMAGE_REFRESH_MS)
+
+        self._status_timer = QtCore.QTimer(self)
+        self._status_timer.timeout.connect(self._refresh_status)
+        self._status_timer.start(STATUS_REFRESH_MS)
 
     def _build_gui(self):
-        self._root.title("Powder Level Monitor")
+        self.setWindowTitle("Powder Level Monitor")
+        self.resize(1100, 850)
 
-        self._canvas = tk.Canvas(
-            self._root,
-            width=self._display_width,
-            height=self._display_height,
-            background="black",
+        central_widget = QtWidgets.QWidget(self)
+        self.setCentralWidget(central_widget)
+
+        main_layout = QtWidgets.QVBoxLayout(central_widget)
+
+        self._image_label = ImageLabel(self)
+        self._image_label.image_clicked.connect(self._on_image_click)
+        main_layout.addWidget(self._image_label, 1)
+
+        button_layout = QtWidgets.QHBoxLayout()
+        main_layout.addLayout(button_layout)
+
+        roi_start_button = QtWidgets.QPushButton("ROI設定開始", self)
+        roi_start_button.clicked.connect(self._start_roi_edit)
+        button_layout.addWidget(roi_start_button)
+
+        roi_send_button = QtWidgets.QPushButton("ROI送信", self)
+        roi_send_button.clicked.connect(self._send_roi)
+        button_layout.addWidget(roi_send_button)
+
+        roi_clear_button = QtWidgets.QPushButton("画面ROIクリア", self)
+        roi_clear_button.clicked.connect(self._clear_editing_roi)
+        button_layout.addWidget(roi_clear_button)
+
+        baseline_set_button = QtWidgets.QPushButton("Baseline設定", self)
+        baseline_set_button.clicked.connect(self._set_baseline)
+        button_layout.addWidget(baseline_set_button)
+
+        baseline_clear_button = QtWidgets.QPushButton("Baselineクリア", self)
+        baseline_clear_button.clicked.connect(self._clear_baseline)
+        button_layout.addWidget(baseline_clear_button)
+
+        measurement_start_button = QtWidgets.QPushButton("測定開始", self)
+        measurement_start_button.clicked.connect(self._start_measurement)
+        button_layout.addWidget(measurement_start_button)
+
+        measurement_stop_button = QtWidgets.QPushButton("測定停止", self)
+        measurement_stop_button.clicked.connect(self._stop_measurement)
+        button_layout.addWidget(measurement_stop_button)
+
+        self._status_label = QtWidgets.QLabel("接続中", self)
+        self._measurement_label = QtWidgets.QLabel("", self)
+        self._roi_label = QtWidgets.QLabel("ROI: 未取得", self)
+
+        main_layout.addWidget(self._status_label)
+        main_layout.addWidget(self._measurement_label)
+        main_layout.addWidget(self._roi_label)
+
+    def _start_image_subscription(self):
+        self._subscription_thread = ImageSubscriptionThread(
+            client=self._client,
+            topic=IMAGE_TOPIC,
+            logger=self._logger,
+            parent=self,
         )
-        self._canvas.pack(fill=tk.BOTH, expand=True)
-        self._canvas.bind("<Button-1>", self._on_canvas_click)
-
-        button_frame = tk.Frame(self._root)
-        button_frame.pack(fill=tk.X)
-
-        tk.Button(
-            button_frame,
-            text="ROI設定開始",
-            command=self._start_roi_edit,
-        ).pack(side=tk.LEFT)
-        tk.Button(
-            button_frame,
-            text="ROI送信",
-            command=self._send_roi,
-        ).pack(side=tk.LEFT)
-        tk.Button(
-            button_frame,
-            text="画面ROIクリア",
-            command=self._clear_editing_roi,
-        ).pack(side=tk.LEFT)
-        tk.Button(
-            button_frame,
-            text="Baseline設定",
-            command=self._set_baseline,
-        ).pack(side=tk.LEFT)
-        tk.Button(
-            button_frame,
-            text="Baselineクリア",
-            command=self._clear_baseline,
-        ).pack(side=tk.LEFT)
-        tk.Button(
-            button_frame,
-            text="測定開始",
-            command=self._start_measurement,
-        ).pack(side=tk.LEFT)
-        tk.Button(
-            button_frame,
-            text="測定停止",
-            command=self._stop_measurement,
-        ).pack(side=tk.LEFT)
-
-        tk.Label(
-            self._root,
-            textvariable=self._status_var,
-            anchor="w",
-        ).pack(fill=tk.X)
-        tk.Label(
-            self._root,
-            textvariable=self._measurement_var,
-            anchor="w",
-        ).pack(fill=tk.X)
-        tk.Label(
-            self._root,
-            textvariable=self._roi_var,
-            anchor="w",
-        ).pack(fill=tk.X)
-
-    def _start_subscription(self):
-        self._subscription_thread = threading.Thread(
-            target=self._subscription_loop,
-            name="PowderImageSubscriptionThread",
-            daemon=True,
+        self._subscription_thread.frame_received.connect(
+            self._on_frame_received,
+        )
+        self._subscription_thread.subscription_error.connect(
+            self._on_subscription_error,
         )
         self._subscription_thread.start()
 
-    def _subscription_loop(self):
+        QtCore.QTimer.singleShot(
+            100,
+            self._request_stream_start,
+        )
+
+    def _request_stream_start(self):
         try:
-            for payload in self._client.subscribe(topic=IMAGE_TOPIC):
-                if not self._subscription_running:
-                    break
-                image_bytes = payload.get("image")
-                if image_bytes is None:
-                    continue
-                encoded = np.frombuffer(image_bytes, dtype=np.uint8)
-                frame = cv2.imdecode(encoded, cv2.IMREAD_COLOR)
-                if frame is None:
-                    continue
-                with self._frame_lock:
-                    self._latest_frame = frame
-                    self._latest_frame_id = payload.get("frame_id")
+            result = self._client.start_stream()
+            if result:
+                self._status_label.setText("画像配信を開始しました")
+            else:
+                self._status_label.setText("画像配信を開始できませんでした")
         except Exception as exc:
-            self._logger.error("<POWDER GUI ACTION> image subscription failed: {}".format(exc))
-            self._status_var.set("画像受信エラー: {}".format(exc))
+            self._status_label.setText(
+                "画像配信開始失敗: {}".format(exc)
+            )
+
+    @QtCore.pyqtSlot(object, object)
+    def _on_frame_received(self, frame, frame_id):
+        self._latest_frame = frame
+        self._latest_frame_id = frame_id
+
+    @QtCore.pyqtSlot(str)
+    def _on_subscription_error(self, message):
+        self._status_label.setText(
+            "画像受信エラー: {}".format(message)
+        )
 
     def _start_roi_edit(self):
         self._editing_roi = True
         self._editing_points = []
-        self._roi_var.set("ROI設定中: 4点を順にクリックしてください")
+        self._roi_label.setText(
+            "ROI設定中: 4点を順にクリックしてください"
+        )
 
     def _clear_editing_roi(self):
         self._editing_points = []
-        self._roi_var.set("画面上の未送信ROIをクリアしました")
+        self._roi_label.setText(
+            "画面上の未送信ROIをクリアしました"
+        )
 
-    def _on_canvas_click(self, event):
+    @QtCore.pyqtSlot(int, int)
+    def _on_image_click(self, x_value, y_value):
         if not self._editing_roi:
             return
+
         if len(self._editing_points) >= 4:
             return
-        if self._display_width <= 0 or self._display_height <= 0:
-            return
 
-        x_value = int(event.x * self._source_width / float(self._display_width))
-        y_value = int(event.y * self._source_height / float(self._display_height))
-        self._editing_points.append([x_value, y_value])
-        self._roi_var.set(
+        self._editing_points.append(
+            [int(x_value), int(y_value)]
+        )
+        self._roi_label.setText(
             "ROI設定中: {}/4 {}".format(
                 len(self._editing_points),
                 self._editing_points,
@@ -181,152 +290,236 @@ class PowderMonitorGui:
 
     def _send_roi(self):
         if len(self._editing_points) != 4:
-            self._status_var.set("ROIは4点指定してから送信してください")
+            self._status_label.setText(
+                "ROIは4点指定してから送信してください"
+            )
             return
+
         try:
-            result = self._client.set_roi_points(self._editing_points)
+            result = self._client.set_roi_points(
+                self._editing_points,
+            )
             if result:
-                self._server_roi_points = [list(point) for point in self._editing_points]
+                self._server_roi_points = [
+                    list(point)
+                    for point in self._editing_points
+                ]
                 self._editing_points = []
                 self._editing_roi = False
-                self._status_var.set("ROIを送信しました。Baselineを再設定してください")
+                self._status_label.setText(
+                    "ROIを送信しました。Baselineを再設定してください"
+                )
         except Exception as exc:
-            self._status_var.set("ROI送信失敗: {}".format(exc))
+            self._status_label.setText(
+                "ROI送信失敗: {}".format(exc)
+            )
 
     def _set_baseline(self):
         try:
             if self._client.set_baseline():
-                self._status_var.set("Baselineを設定しました")
+                self._status_label.setText("Baselineを設定しました")
             else:
                 status = self._client.get_status()
-                self._status_var.set(
-                    "Baseline設定失敗: {}".format(status.get("last_error"))
+                self._status_label.setText(
+                    "Baseline設定失敗: {}".format(
+                        status.get("last_error"),
+                    )
                 )
         except Exception as exc:
-            self._status_var.set("Baseline設定失敗: {}".format(exc))
+            self._status_label.setText(
+                "Baseline設定失敗: {}".format(exc)
+            )
 
     def _clear_baseline(self):
         try:
             self._client.clear_baseline()
-            self._status_var.set("Baselineをクリアしました")
+            self._status_label.setText("Baselineをクリアしました")
         except Exception as exc:
-            self._status_var.set("Baselineクリア失敗: {}".format(exc))
+            self._status_label.setText(
+                "Baselineクリア失敗: {}".format(exc)
+            )
 
     def _start_measurement(self):
         try:
             if self._client.start_measurement():
-                self._status_var.set("測定を開始しました")
+                self._status_label.setText("測定を開始しました")
             else:
                 status = self._client.get_status()
-                self._status_var.set(
-                    "測定開始失敗: {}".format(status.get("last_error"))
+                self._status_label.setText(
+                    "測定開始失敗: {}".format(
+                        status.get("last_error"),
+                    )
                 )
         except Exception as exc:
-            self._status_var.set("測定開始失敗: {}".format(exc))
+            self._status_label.setText(
+                "測定開始失敗: {}".format(exc)
+            )
 
     def _stop_measurement(self):
         try:
             self._client.stop_measurement()
-            self._status_var.set("測定を停止しました")
+            self._status_label.setText("測定を停止しました")
         except Exception as exc:
-            self._status_var.set("測定停止失敗: {}".format(exc))
+            self._status_label.setText(
+                "測定停止失敗: {}".format(exc)
+            )
 
     def _refresh_status(self):
         try:
             status = self._client.get_status()
             measurement = status.get("measurement", {})
             self._server_roi_points = status.get("roi_points", [])
-            self._measurement_var.set(
-                "state={} detected={} level_y={} decrease_mm={} baseline={} frame_id={}".format(
+
+            self._measurement_label.setText(
+                "state={} detected={} level_y={} decrease_mm={} "
+                "baseline={} frame_id={} stream={}".format(
                     status.get("state"),
                     measurement.get("detected"),
                     measurement.get("level_y"),
                     measurement.get("decrease_mm"),
                     status.get("baseline_level_y"),
                     self._latest_frame_id,
+                    status.get("image_stream", {}).get("stream_running"),
                 )
             )
+
             if not self._editing_roi:
-                self._roi_var.set("server ROI: {}".format(self._server_roi_points))
+                self._roi_label.setText(
+                    "server ROI: {}".format(
+                        self._server_roi_points,
+                    )
+                )
         except Exception as exc:
-            self._status_var.set("状態取得失敗: {}".format(exc))
-        self._root.after(STATUS_REFRESH_MS, self._refresh_status)
+            self._status_label.setText(
+                "状態取得失敗: {}".format(exc)
+            )
 
     def _refresh_image(self):
-        with self._frame_lock:
-            if self._latest_frame is None:
-                frame = None
-            else:
-                frame = self._latest_frame.copy()
+        if self._latest_frame is None:
+            return
 
-        if frame is not None:
-            self._source_height = int(frame.shape[0])
-            self._source_width = int(frame.shape[1])
-            rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-            image = Image.fromarray(rgb)
-            image.thumbnail((960, 720))
-            self._display_width = image.width
-            self._display_height = image.height
-            self._canvas.config(
-                width=self._display_width,
-                height=self._display_height,
+        frame = self._latest_frame.copy()
+        self._draw_roi(
+            frame,
+            self._server_roi_points,
+            (0, 255, 0),
+        )
+        self._draw_roi(
+            frame,
+            self._editing_points,
+            (0, 255, 255),
+        )
+
+        rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+        height = int(rgb.shape[0])
+        width = int(rgb.shape[1])
+        bytes_per_line = int(rgb.strides[0])
+
+        image = QtGui.QImage(
+            rgb.data,
+            width,
+            height,
+            bytes_per_line,
+            QtGui.QImage.Format_RGB888,
+        ).copy()
+
+        pixmap = QtGui.QPixmap.fromImage(image)
+        scaled_pixmap = pixmap.scaled(
+            self._image_label.size(),
+            QtCore.Qt.KeepAspectRatio,
+            QtCore.Qt.SmoothTransformation,
+        )
+
+        x_offset = int(
+            (self._image_label.width() - scaled_pixmap.width()) / 2
+        )
+        y_offset = int(
+            (self._image_label.height() - scaled_pixmap.height()) / 2
+        )
+
+        self._image_label.set_source_size(width, height)
+        self._image_label.set_display_rect(
+            QtCore.QRect(
+                x_offset,
+                y_offset,
+                scaled_pixmap.width(),
+                scaled_pixmap.height(),
             )
-            self._photo = ImageTk.PhotoImage(image)
-            self._canvas.delete("all")
-            self._canvas.create_image(0, 0, anchor=tk.NW, image=self._photo)
-            self._draw_points(self._server_roi_points, "lime", "server_roi")
-            self._draw_points(self._editing_points, "yellow", "editing_roi")
+        )
+        self._image_label.setPixmap(scaled_pixmap)
 
-        self._root.after(IMAGE_REFRESH_MS, self._refresh_image)
-
-    def _draw_points(self, points, color, tag):
+    def _draw_roi(self, frame, points, color):
         if not points:
             return
-        display_points = []
+
+        draw_points = []
+
         for index, point in enumerate(points):
-            x_value = int(point[0] * self._display_width / float(self._source_width))
-            y_value = int(point[1] * self._display_height / float(self._source_height))
-            display_points.append((x_value, y_value))
-            self._canvas.create_oval(
-                x_value - 5,
-                y_value - 5,
-                x_value + 5,
-                y_value + 5,
-                fill=color,
-                outline=color,
-                tags=tag,
+            x_value = int(point[0])
+            y_value = int(point[1])
+            draw_points.append([x_value, y_value])
+
+            cv2.circle(
+                frame,
+                (x_value, y_value),
+                6,
+                color,
+                -1,
             )
-            self._canvas.create_text(
-                x_value + 12,
-                y_value - 12,
-                text=str(index + 1),
-                fill=color,
-                tags=tag,
-            )
-        if len(display_points) >= 2:
-            line_points = list(display_points)
-            if len(display_points) == 4:
-                line_points.append(display_points[0])
-            flat_points = []
-            for point in line_points:
-                flat_points.extend(point)
-            self._canvas.create_line(
-                *flat_points,
-                fill=color,
-                width=2,
-                tags=tag,
+            cv2.putText(
+                frame,
+                str(index + 1),
+                (x_value + 8, y_value - 8),
+                cv2.FONT_HERSHEY_SIMPLEX,
+                0.6,
+                color,
+                2,
+                cv2.LINE_AA,
             )
 
-    def _close(self):
-        self._subscription_running = False
+        if len(draw_points) >= 2:
+            polyline = np.array(
+                draw_points,
+                dtype=np.int32,
+            ).reshape((-1, 1, 2))
+            cv2.polylines(
+                frame,
+                [polyline],
+                len(draw_points) == 4,
+                color,
+                2,
+                cv2.LINE_AA,
+            )
+
+    def closeEvent(self, event):
+        self._image_timer.stop()
+        self._status_timer.stop()
+
+        try:
+            self._client.stop_stream()
+        except Exception as exc:
+            self._logger.error(
+                "<POWDER GUI ACTION> stop_stream failed: {}".format(
+                    exc,
+                )
+            )
+
+        if self._subscription_thread is not None:
+            self._subscription_thread.stop()
+
         self._client.close()
-        self._root.destroy()
+
+        if self._subscription_thread is not None:
+            self._subscription_thread.wait(2000)
+
+        event.accept()
 
 
 def main():
-    root = tk.Tk()
-    PowderMonitorGui(root)
-    root.mainloop()
+    app = QtWidgets.QApplication(sys.argv)
+    window = PowderMonitorGui()
+    window.show()
+    sys.exit(app.exec_())
 
 
 if __name__ == "__main__":

@@ -47,18 +47,14 @@ class PowderLevelDeviceClass:
         self._image_device._set_event_bus(event_bus)
 
     def connect(self):
-        """カメラ取得、認識ループ、gRPC画像publishを開始する。"""
+        """カメラ取得とサーバー内部の認識ループを開始する。"""
         self._logger.info("<POWDER LEVEL ACTION> connect")
-        if not self._powder_device.connect():
-            return False
-        if not self._image_device.start_stream():
-            self._powder_device.disconnect()
-            return False
-        return True
+        return self._powder_device.connect()
 
     def disconnect(self):
         """測定、認識ループ、画像配信、カメラ接続を停止する。"""
         self._logger.info("<POWDER LEVEL ACTION> disconnect")
+        self._image_device.stop_stream()
         return self._powder_device.disconnect()
 
     def start_stream(self):
