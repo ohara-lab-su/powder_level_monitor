@@ -8,3 +8,6 @@ protobuf==3.20.3
 x_logger
 grpc_frame
 dataclasses==0.8; python_version < "3.7"
+
+git+https://github.com/ohara-lab-su/x_logger.git
+git+https://github.com/ohara-lab-su/grpc_frame.git
