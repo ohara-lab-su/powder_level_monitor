@@ -19,11 +19,9 @@ class ImageStreamDeviceClass:
         logger: Optional[Any] = None,
     ) -> None:
         if logger is None:
-            from x_logger import XLogger
-            logger = XLogger(
-                log_level="debug",
-                logger_name=self.__class__.__name__,
-            )
+            import logging
+            logging.basicConfig(level=logging.INFO)
+            logger = logging.getLogger(__name__)
         self._logger = logger
         self._camera_id: int = int(camera_id)
         self._topic_name: str = str(topic_name)

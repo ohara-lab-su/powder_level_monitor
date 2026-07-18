@@ -1,4 +1,7 @@
-from grpc_frame.grpc_client import SyncGrpcClient
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+
+from power_level_monitor.grpc_client import PowderLevelGrpcClient
 from x_logger import XLogger
 
 
@@ -10,18 +13,14 @@ MAX_MESSAGE_MB = 64
 def main():
     logger = XLogger(
         log_level="debug",
-        logger_name="get_baseline_client",
+        logger_name="get_baseline",
     )
-    max_message_bytes = MAX_MESSAGE_MB * 1024 * 1024
-    client = SyncGrpcClient(
+    client = PowderLevelGrpcClient(
         server_ip=SERVER_IP,
-        server_port=SERVER_PORT,
+        grpc_port=SERVER_PORT,
         timeout_sec=5.0,
         logger=logger,
-        grpc_options=(
-            ("grpc.max_send_message_length", max_message_bytes),
-            ("grpc.max_receive_message_length", max_message_bytes),
-        ),
+        max_message_mb=MAX_MESSAGE_MB,
     )
     try:
         print(client.get_baseline())

@@ -6,7 +6,7 @@ import cv2
 import numpy as np
 from PIL import Image
 from PIL import ImageTk
-from grpc_frame.grpc_client import SyncGrpcClient
+from power_level_monitor.grpc_client import PowderLevelGrpcClient
 from x_logger import XLogger
 
 
@@ -25,16 +25,12 @@ class PowderMonitorGui:
             log_level="debug",
             logger_name="PowderMonitorGui",
         )
-        max_message_bytes = MAX_MESSAGE_MB * 1024 * 1024
-        self._client = SyncGrpcClient(
+        self._client = PowderLevelGrpcClient(
             server_ip=SERVER_IP,
-            server_port=SERVER_PORT,
+            grpc_port=SERVER_PORT,
             timeout_sec=5.0,
             logger=self._logger,
-            grpc_options=(
-                ("grpc.max_send_message_length", max_message_bytes),
-                ("grpc.max_receive_message_length", max_message_bytes),
-            ),
+            max_message_mb=MAX_MESSAGE_MB,
         )
 
         self._frame_lock = threading.Lock()

@@ -1,11 +1,13 @@
-from typing import Any, Dict, List, Optional
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+"""Camera streaming and powder measurement device."""
 
 from power_level_monitor.image_stream_ctrl import ImageStreamDeviceClass
 from power_level_monitor.powder_monitor_ctrl import PowderControlDeviceClass
 
 
 class PowderLevelDeviceClass:
-    """画像配信と粉体レベル測定を一つの装置として扱う。"""
+    """画像取得・gRPC画像配信・粉体測定を一つの制御対象として公開する。"""
 
     def __init__(
         self,
@@ -19,6 +21,7 @@ class PowderLevelDeviceClass:
     ):
         if logger is None:
             from x_logger import XLogger
+
             logger = XLogger(
                 log_level="debug",
                 logger_name=self.__class__.__name__,
@@ -40,17 +43,32 @@ class PowderLevelDeviceClass:
         )
 
     def _set_event_bus(self, event_bus):
+        """grpc_frame から注入された EventBus を画像配信クラスへ渡す。"""
         self._image_device._set_event_bus(event_bus)
 
     def connect(self):
+        """カメラ取得、認識ループ、gRPC画像publishを開始する。"""
         self._logger.info("<POWDER LEVEL ACTION> connect")
         if not self._powder_device.connect():
             return False
-        return self._image_device.start_stream()
+        if not self._image_device.start_stream():
+            self._powder_device.disconnect()
+            return False
+        return True
 
     def disconnect(self):
+        """測定、認識ループ、画像配信、カメラ接続を停止する。"""
         self._logger.info("<POWDER LEVEL ACTION> disconnect")
         return self._powder_device.disconnect()
+
+    def start_stream(self):
+        return self._image_device.start_stream()
+
+    def stop_stream(self):
+        return self._image_device.stop_stream()
+
+    def publish_once(self):
+        return self._image_device.publish_once()
 
     def get_image_status(self):
         return self._image_device.get_status()

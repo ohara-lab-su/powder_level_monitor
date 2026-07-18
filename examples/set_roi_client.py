@@ -1,37 +1,35 @@
-import json
-from pathlib import Path
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
 
-from grpc_frame.grpc_client import SyncGrpcClient
+import json
+import os
+
+from power_level_monitor.grpc_client import PowderLevelGrpcClient
 from x_logger import XLogger
 
 
 SERVER_IP = "127.0.0.1"
 SERVER_PORT = 50051
 MAX_MESSAGE_MB = 64
-ROI_FILE = Path(__file__).resolve().parent / "roi.json"
+ROI_FILE = os.path.join(os.path.dirname(__file__), "roi.json")
 
 
 def main():
     logger = XLogger(
         log_level="debug",
-        logger_name="SetRoiClient",
+        logger_name="set_roi_client",
     )
-    max_message_bytes = MAX_MESSAGE_MB * 1024 * 1024
-    client = SyncGrpcClient(
+    client = PowderLevelGrpcClient(
         server_ip=SERVER_IP,
-        server_port=SERVER_PORT,
+        grpc_port=SERVER_PORT,
         timeout_sec=5.0,
         logger=logger,
-        grpc_options=(
-            ("grpc.max_send_message_length", max_message_bytes),
-            ("grpc.max_receive_message_length", max_message_bytes),
-        ),
+        max_message_mb=MAX_MESSAGE_MB,
     )
     try:
-        with ROI_FILE.open("r", encoding="utf-8") as file_obj:
+        with open(ROI_FILE, "r", encoding="utf-8") as file_obj:
             roi_data = json.load(file_obj)
-        points = roi_data.get("points", roi_data)
-        print(client.set_roi_points(points))
+        print(client.set_roi_points(roi_data["points"]))
     finally:
         client.close()
 
