@@ -1,10 +1,8 @@
-from __future__ import annotations
-
 import threading
 import time
 from dataclasses import asdict
 from dataclasses import fields
-from typing import Any
+from typing import Any, Dict, List, Optional, Set, Tuple
 
 import cv2
 import numpy as np
@@ -22,11 +20,11 @@ class PowderControlDeviceClass:
 
     def __init__(
         self,
-        image_source: ImageStreamDeviceClass | None = None,
+        image_source: Optional[ImageStreamDeviceClass] = None,
         measurement_interval_sec: float = 0.1,
-        logger: Any | None = None,
+        logger: Optional[Any] = None,
     ) -> None:
-        self._logger: Any | None = logger
+        self._logger: Optional[Any] = logger
         self._image_source: ImageStreamDeviceClass = image_source
         if self._image_source is None:
             self._image_source = ImageStreamDeviceClass()
@@ -34,35 +32,35 @@ class PowderControlDeviceClass:
         self._measurement_interval_sec: float = float(
             measurement_interval_sec,
         )
-        self._roi_points: list[list[int]] = []
-        self._baseline_level_y: float | None = None
-        self._latest_level_y: float | None = None
-        self._latest_decrease_mm: float | None = None
-        self._latest_surface: SurfaceDetection | None = None
+        self._roi_points: List[List[int]] = []
+        self._baseline_level_y: Optional[float] = None
+        self._latest_level_y: Optional[float] = None
+        self._latest_decrease_mm: Optional[float] = None
+        self._latest_surface: Optional[SurfaceDetection] = None
         self._latest_detected: bool = False
-        self._latest_frame_id: int | None = None
-        self._latest_frame_time_ns: int | None = None
+        self._latest_frame_id: Optional[int] = None
+        self._latest_frame_time_ns: Optional[int] = None
         self._control_values: ControlValues = ControlValues()
         self._running: bool = False
         self._connected: bool = False
-        self._timestamp_ns: int | None = None
-        self._last_error: str | None = None
+        self._timestamp_ns: Optional[int] = None
+        self._last_error: Optional[str] = None
 
         self._lock: threading.RLock = threading.RLock()
         self._stop_event: threading.Event = threading.Event()
-        self._thread: threading.Thread | None = None
+        self._thread: Optional[threading.Thread] = None
 
     def connect(self) -> bool:
         connected: bool = self._image_source.connect()
 
         with self._lock:
             self._connected = connected
-            self._timestamp_ns = time.time_ns()
+            self._timestamp_ns = int(time.time() * 1000000000)
 
             if connected:
                 self._last_error = None
             else:
-                status: dict[str, Any] = self._image_source.get_status()
+                status: Dict[str, Any] = self._image_source.get_status()
                 self._last_error = status.get("last_error")
 
         return connected
@@ -73,7 +71,7 @@ class PowderControlDeviceClass:
 
         with self._lock:
             self._connected = False
-            self._timestamp_ns = time.time_ns()
+            self._timestamp_ns = int(time.time() * 1000000000)
 
         return disconnected
 
@@ -93,7 +91,7 @@ class PowderControlDeviceClass:
                 daemon=True,
             )
             self._running = True
-            self._timestamp_ns = time.time_ns()
+            self._timestamp_ns = int(time.time() * 1000000000)
             self._thread.start()
 
         return True
@@ -101,7 +99,7 @@ class PowderControlDeviceClass:
     def stop(self) -> bool:
         self._stop_event.set()
 
-        thread: threading.Thread | None = self._thread
+        thread: Optional[threading.Thread] = self._thread
         if thread is not None:
             if thread.is_alive():
                 thread.join(timeout=2.0)
@@ -109,30 +107,30 @@ class PowderControlDeviceClass:
         with self._lock:
             self._thread = None
             self._running = False
-            self._timestamp_ns = time.time_ns()
+            self._timestamp_ns = int(time.time() * 1000000000)
 
         return True
 
     def process_once(self) -> bool:
-        frame: np.ndarray | None = self._image_source.get_latest_frame()
+        frame: Optional[np.ndarray] = self._image_source.get_latest_frame()
 
         if frame is None:
             with self._lock:
                 self._latest_detected = False
                 self._last_error = "No camera frame is available."
-                self._timestamp_ns = time.time_ns()
+                self._timestamp_ns = int(time.time() * 1000000000)
             return False
 
-        image_status: dict[str, Any] = self._image_source.get_status()
-        frame_id: int | None = image_status.get("frame_id")
-        frame_time_ns: int | None = image_status.get("latest_frame_time_ns")
+        image_status: Dict[str, Any] = self._image_source.get_status()
+        frame_id: Optional[int] = image_status.get("frame_id")
+        frame_time_ns: Optional[int] = image_status.get("latest_frame_time_ns")
 
         with self._lock:
-            roi_points: list[list[int]] = self.get_roi_points()
+            roi_points: List[List[int]] = self.get_roi_points()
             controls: ControlValues = ControlValues(
                 **asdict(self._control_values),
             )
-            baseline_level_y: float | None = self._baseline_level_y
+            baseline_level_y: Optional[float] = self._baseline_level_y
 
         if len(roi_points) != 4:
             with self._lock:
@@ -140,7 +138,7 @@ class PowderControlDeviceClass:
                 self._latest_frame_id = frame_id
                 self._latest_frame_time_ns = frame_time_ns
                 self._last_error = "ROI points are not set."
-                self._timestamp_ns = time.time_ns()
+                self._timestamp_ns = int(time.time() * 1000000000)
             return False
 
         try:
@@ -155,7 +153,7 @@ class PowderControlDeviceClass:
                 self._latest_frame_id = frame_id
                 self._latest_frame_time_ns = frame_time_ns
                 self._last_error = str(exc)
-                self._timestamp_ns = time.time_ns()
+                self._timestamp_ns = int(time.time() * 1000000000)
             return False
 
         if surface is None:
@@ -165,10 +163,10 @@ class PowderControlDeviceClass:
                 self._latest_frame_id = frame_id
                 self._latest_frame_time_ns = frame_time_ns
                 self._last_error = None
-                self._timestamp_ns = time.time_ns()
+                self._timestamp_ns = int(time.time() * 1000000000)
             return False
 
-        decrease_mm: float | None = None
+        decrease_mm: Optional[float] = None
         if baseline_level_y is not None:
             decrease_mm = self._pixel_delta_to_mm(
                 current_level_y=current_level_y,
@@ -187,12 +185,12 @@ class PowderControlDeviceClass:
 
     def set_roi_points(
         self,
-        points: list[list[int]],
+        points: List[List[int]],
     ) -> bool:
         if len(points) != 4:
             raise ValueError("ROI points must contain four points.")
 
-        normalized_points: list[list[int]] = []
+        normalized_points: List[List[int]] = []
         for point in points:
             if len(point) != 2:
                 raise ValueError("Each ROI point must contain x and y.")
@@ -206,17 +204,17 @@ class PowderControlDeviceClass:
             self._baseline_level_y = None
             self._latest_detected = False
             self._latest_surface = None
-            self._timestamp_ns = time.time_ns()
+            self._timestamp_ns = int(time.time() * 1000000000)
             self._last_error = None
 
         return True
 
-    def get_roi_points(self) -> list[list[int]]:
-        copied_points: list[list[int]] = []
+    def get_roi_points(self) -> List[List[int]]:
+        copied_points: List[List[int]] = []
 
         with self._lock:
             for point in self._roi_points:
-                copied_point: list[int] = [
+                copied_point: List[int] = [
                     int(point[0]),
                     int(point[1]),
                 ]
@@ -230,7 +228,7 @@ class PowderControlDeviceClass:
             self._baseline_level_y = None
             self._latest_detected = False
             self._latest_surface = None
-            self._timestamp_ns = time.time_ns()
+            self._timestamp_ns = int(time.time() * 1000000000)
 
         return True
 
@@ -246,7 +244,7 @@ class PowderControlDeviceClass:
 
             self._baseline_level_y = self._latest_level_y
             self._latest_decrease_mm = 0.0
-            self._timestamp_ns = time.time_ns()
+            self._timestamp_ns = int(time.time() * 1000000000)
             self._last_error = None
 
         return True
@@ -255,34 +253,34 @@ class PowderControlDeviceClass:
         with self._lock:
             self._baseline_level_y = None
             self._latest_decrease_mm = None
-            self._timestamp_ns = time.time_ns()
+            self._timestamp_ns = int(time.time() * 1000000000)
 
         return True
 
-    def get_baseline(self) -> float | None:
+    def get_baseline(self) -> Optional[float]:
         with self._lock:
             return self._baseline_level_y
 
     def set_detector_params(
         self,
-        params: dict[str, Any],
+        params: Dict[str, Any],
     ) -> bool:
         control_values: ControlValues = self._make_control_values(params)
 
         with self._lock:
             self._control_values = control_values
-            self._timestamp_ns = time.time_ns()
+            self._timestamp_ns = int(time.time() * 1000000000)
             self._last_error = None
 
         return True
 
-    def get_detector_params(self) -> dict[str, Any]:
+    def get_detector_params(self) -> Dict[str, Any]:
         with self._lock:
             return asdict(self._control_values)
 
-    def get_measurement(self) -> dict[str, Any]:
+    def get_measurement(self) -> Dict[str, Any]:
         with self._lock:
-            surface_data: dict[str, Any] | None = None
+            surface_data: Optional[Dict[str, Any]] = None
 
             if self._latest_surface is not None:
                 surface_data = {
@@ -304,11 +302,11 @@ class PowderControlDeviceClass:
                 "last_error": self._last_error,
             }
 
-    def get_status(self) -> dict[str, Any]:
+    def get_status(self) -> Dict[str, Any]:
         with self._lock:
             running: bool = self._running
             connected: bool = self._connected
-            last_error: str | None = self._last_error
+            last_error: Optional[str] = self._last_error
 
         return {
             "connected": connected,
@@ -333,9 +331,9 @@ class PowderControlDeviceClass:
     def _process_frame(
         self,
         frame: np.ndarray,
-        roi_points: list[list[int]],
+        roi_points: List[List[int]],
         controls: ControlValues,
-    ) -> tuple[SurfaceDetection | None, float | None]:
+    ) -> Tuple[Optional[SurfaceDetection], Optional[float]]:
         matrix: np.ndarray = self._create_perspective_matrix(roi_points)
         rectified: np.ndarray = cv2.warpPerspective(
             frame,
@@ -354,7 +352,7 @@ class PowderControlDeviceClass:
             inner_roi,
             controls,
         )
-        surface: SurfaceDetection | None = self._detect_surface(
+        surface: Optional[SurfaceDetection] = self._detect_surface(
             mask,
             controls,
         )
@@ -367,7 +365,7 @@ class PowderControlDeviceClass:
 
     def _create_perspective_matrix(
         self,
-        roi_points: list[list[int]],
+        roi_points: List[List[int]],
     ) -> np.ndarray:
         source_points = np.array(
             roi_points,
@@ -395,7 +393,7 @@ class PowderControlDeviceClass:
         self,
         rectified: np.ndarray,
         controls: ControlValues,
-    ) -> tuple[np.ndarray, tuple[int, int, int, int]]:
+    ) -> Tuple[np.ndarray, Tuple[int, int, int, int]]:
         height, width = rectified.shape[:2]
         margin_x: int = int(width * controls.margin_x_ratio)
         margin_y: int = int(height * controls.margin_y_ratio)
@@ -506,7 +504,7 @@ class PowderControlDeviceClass:
         controls: ControlValues,
     ) -> np.ndarray:
         height, width = mask.shape[:2]
-        points: list[tuple[int, int]] = []
+        points: List[Tuple[int, int]] = []
 
         for x in range(width):
             column = mask[:, x] > 0
@@ -553,7 +551,7 @@ class PowderControlDeviceClass:
         self,
         mask: np.ndarray,
         controls: ControlValues,
-    ) -> SurfaceDetection | None:
+    ) -> Optional[SurfaceDetection]:
         mask_area: int = int(cv2.countNonZero(mask))
 
         if mask_area < controls.min_area:
@@ -630,9 +628,9 @@ class PowderControlDeviceClass:
         self,
         surface: SurfaceDetection,
         level_y: float,
-        decrease_mm: float | None,
-        frame_id: int | None,
-        frame_time_ns: int | None,
+        decrease_mm: Optional[float],
+        frame_id: Optional[int],
+        frame_time_ns: Optional[int],
     ) -> None:
         with self._lock:
             self._latest_surface = surface
@@ -641,19 +639,19 @@ class PowderControlDeviceClass:
             self._latest_detected = True
             self._latest_frame_id = frame_id
             self._latest_frame_time_ns = frame_time_ns
-            self._timestamp_ns = time.time_ns()
+            self._timestamp_ns = int(time.time() * 1000000000)
             self._last_error = None
 
     def _make_control_values(
         self,
-        params: dict[str, Any],
+        params: Dict[str, Any],
     ) -> ControlValues:
         with self._lock:
-            current_values: dict[str, Any] = asdict(
+            current_values: Dict[str, Any] = asdict(
                 self._control_values,
             )
 
-        valid_names: set[str] = self._get_control_value_names()
+        valid_names: Set[str] = self._get_control_value_names()
 
         for key, value in params.items():
             if key not in valid_names:
@@ -728,8 +726,8 @@ class PowderControlDeviceClass:
             measure_height_mm=measure_height_mm,
         )
 
-    def _get_control_value_names(self) -> set[str]:
-        control_value_names: set[str] = set()
+    def _get_control_value_names(self) -> Set[str]:
+        control_value_names: Set[str] = set()
 
         for field_info in fields(ControlValues):
             control_value_names.add(field_info.name)

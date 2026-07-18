@@ -1,5 +1,3 @@
-from __future__ import annotations
-
 import time
 
 from power_level_monitor.server_fastapi.client import PowderControlClient

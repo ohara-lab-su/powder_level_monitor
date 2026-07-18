@@ -1,8 +1,6 @@
-from __future__ import annotations
-
 import threading
 import time
-from typing import Any
+from typing import Any, Dict, List, Optional
 
 import cv2
 import numpy as np
@@ -18,19 +16,19 @@ class ImageStreamDeviceClass:
         interval_sec: float = 0.1,
         capture_interval_sec: float = 0.03,
         jpeg_quality: int = 85,
-        logger: Any | None = None,
+        logger: Optional[Any] = None,
     ) -> None:
-        self._logger: Any | None = logger
+        self._logger: Optional[Any] = logger
         self._camera_id: int = int(camera_id)
         self._topic_name: str = str(topic_name)
         self._interval_sec: float = float(interval_sec)
         self._capture_interval_sec: float = float(capture_interval_sec)
         self._jpeg_quality: int = int(jpeg_quality)
 
-        self._event_bus: Any | None = None
-        self._capture: cv2.VideoCapture | None = None
-        self._capture_thread: threading.Thread | None = None
-        self._stream_thread: threading.Thread | None = None
+        self._event_bus: Optional[Any] = None
+        self._capture: Optional[cv2.VideoCapture] = None
+        self._capture_thread: Optional[threading.Thread] = None
+        self._stream_thread: Optional[threading.Thread] = None
         self._capture_stop_event: threading.Event = threading.Event()
         self._stream_stop_event: threading.Event = threading.Event()
         self._frame_lock: threading.Lock = threading.Lock()
@@ -39,10 +37,10 @@ class ImageStreamDeviceClass:
         self._stream_running: bool = False
         self._frame_id: int = 0
         self._latest_frame_id: int = 0
-        self._latest_frame: np.ndarray | None = None
-        self._latest_frame_time_ns: int | None = None
-        self._last_error: str | None = None
-        self._last_publish_time_ns: int | None = None
+        self._latest_frame: Optional[np.ndarray] = None
+        self._latest_frame_time_ns: Optional[int] = None
+        self._last_error: Optional[str] = None
+        self._last_publish_time_ns: Optional[int] = None
 
     def _set_event_bus(
         self,
@@ -117,7 +115,7 @@ class ImageStreamDeviceClass:
     def get_latest_frame(
         self,
         copy_frame: bool = True,
-    ) -> np.ndarray | None:
+    ) -> Optional[np.ndarray]:
         with self._frame_lock:
             if self._latest_frame is None:
                 return None
@@ -127,12 +125,12 @@ class ImageStreamDeviceClass:
 
             return self._latest_frame
 
-    def capture_once(self) -> dict[str, Any]:
+    def capture_once(self) -> Dict[str, Any]:
         connected: bool = self.connect()
         if not connected:
             raise RuntimeError(str(self._last_error))
 
-        frame: np.ndarray | None = self.get_latest_frame()
+        frame: Optional[np.ndarray] = self.get_latest_frame()
 
         if frame is None:
             timeout_time: float = time.monotonic() + 2.0
@@ -150,16 +148,16 @@ class ImageStreamDeviceClass:
         if self._event_bus is None:
             raise RuntimeError("EventBus is not set.")
 
-        payload: dict[str, Any] = self.capture_once()
+        payload: Dict[str, Any] = self.capture_once()
         self._event_bus.publish(
             self._topic_name,
             payload,
             source="image_stream_device",
         )
-        self._last_publish_time_ns = time.time_ns()
+        self._last_publish_time_ns = int(time.time() * 1000000000)
         return True
 
-    def get_status(self) -> dict[str, Any]:
+    def get_status(self) -> Dict[str, Any]:
         capture_opened: bool = False
         if self._capture is not None:
             capture_opened = bool(self._capture.isOpened())
@@ -215,7 +213,7 @@ class ImageStreamDeviceClass:
                 time.sleep(self._capture_interval_sec)
                 continue
 
-            frame_time_ns: int = time.time_ns()
+            frame_time_ns: int = int(time.time() * 1000000000)
 
             with self._frame_lock:
                 self._latest_frame_id = self._latest_frame_id + 1
@@ -241,8 +239,8 @@ class ImageStreamDeviceClass:
     def _encode_frame(
         self,
         frame: np.ndarray,
-    ) -> dict[str, Any]:
-        encode_params: list[int] = [
+    ) -> Dict[str, Any]:
+        encode_params: List[int] = [
             int(cv2.IMWRITE_JPEG_QUALITY),
             self._jpeg_quality,
         ]
@@ -264,7 +262,7 @@ class ImageStreamDeviceClass:
         return {
             "frame_id": self._frame_id,
             "camera_frame_id": self._latest_frame_id,
-            "timestamp_ns": time.time_ns(),
+            "timestamp_ns": int(time.time() * 1000000000),
             "camera_timestamp_ns": self._latest_frame_time_ns,
             "encoding": "jpg",
             "width": width,

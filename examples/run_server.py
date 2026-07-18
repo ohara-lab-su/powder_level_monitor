@@ -1,5 +1,3 @@
-from __future__ import annotations
-
 from ese774_frame.api_server import FastApiServer
 from ese774_frame.routers.device_router import DeviceRouter
 from grpc_frame.event_bus import EventBus

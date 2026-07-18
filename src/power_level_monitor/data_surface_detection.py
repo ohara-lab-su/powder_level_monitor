@@ -1,4 +1,4 @@
-from __future__ import annotations
+from typing import Tuple
 
 from dataclasses import dataclass
 
@@ -8,6 +8,6 @@ class SurfaceDetection:
     """粉体上面の検出結果である。"""
 
     center_y: float
-    line_left: tuple[int, int]
-    line_right: tuple[int, int]
+    line_left: Tuple[int, int]
+    line_right: Tuple[int, int]
     point_count: int

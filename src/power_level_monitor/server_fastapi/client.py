@@ -1,6 +1,4 @@
-from __future__ import annotations
-
-from typing import Any
+from typing import Any, Optional
 
 from ese774_frame.clients.sync_device_client import SyncDeviceClient
 
@@ -15,7 +13,7 @@ class PowderControlClient(SyncDeviceClient):
         self,
         server_ip: str,
         server_port: int,
-        logger: Any | None = None,
+        logger: Optional[Any] = None,
     ) -> None:
         super().__init__(
             server_ip=server_ip,

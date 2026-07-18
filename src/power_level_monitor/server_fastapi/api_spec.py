@@ -1,5 +1,3 @@
-from __future__ import annotations
-
 from ese774_frame.api_spec import ApiSpec
 
 from power_level_monitor.server_fastapi.api_models import BaselineResponse

@@ -1,4 +1,4 @@
-from __future__ import annotations
+from typing import List
 
 import time
 
@@ -13,7 +13,7 @@ WINDOW_NAME = "powder level local"
 
 class RoiSelector:
     def __init__(self) -> None:
-        self.points: list[list[int]] = []
+        self.points: List[List[int]] = []
 
     def on_mouse(
         self,

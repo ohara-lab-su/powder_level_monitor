@@ -1,6 +1,4 @@
-from __future__ import annotations
-
-from typing import Any
+from typing import Any, Dict, List, Optional
 
 from pydantic import BaseModel
 
@@ -10,28 +8,28 @@ class BoolResponse(BaseModel):
 
 
 class StatusResponse(BaseModel):
-    result: dict[str, Any]
+    result: Dict[str, Any]
 
 
 class RoiPointsRequest(BaseModel):
-    points: list[list[int]]
+    points: List[List[int]]
 
 
 class RoiPointsResponse(BaseModel):
-    result: list[list[int]]
+    result: List[List[int]]
 
 
 class BaselineResponse(BaseModel):
-    result: float | None
+    result: Optional[float]
 
 
 class DetectorParamsRequest(BaseModel):
-    params: dict[str, Any]
+    params: Dict[str, Any]
 
 
 class DetectorParamsResponse(BaseModel):
-    result: dict[str, Any]
+    result: Dict[str, Any]
 
 
 class MeasurementResponse(BaseModel):
-    result: dict[str, Any]
+    result: Dict[str, Any]
