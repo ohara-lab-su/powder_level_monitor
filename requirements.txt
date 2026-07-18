@@ -1,0 +1,10 @@
+opencv-python>=4.8,<5
+numpy==1.19.5; python_version < "3.10"
+numpy>=1.26,<3; python_version >= "3.10"
+PySide6>=6.6,<7
+grpcio==1.48.2; python_version < "3.11"
+grpcio>=1.60,<2; python_version >= "3.11"
+protobuf==3.20.3
+x_logger
+grpc_frame
+dataclasses==0.8; python_version < "3.7"

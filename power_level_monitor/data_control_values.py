@@ -1,16 +1,9 @@
-from __future__ import annotations
-
 from dataclasses import dataclass
 
 
 @dataclass
 class ControlValues:
-    """粉体検出の調整値である。
-
-    元の powder_level_monitor.py に定義されていた ControlValues を
-    DeviceClass 側から参照するためのデータ定義である。
-    変換、検証、補正はこのクラスでは行わない。
-    """
+    """粉体検出の調整値である。"""
 
     mode: int = 0
     manual_threshold: int = 120
