@@ -6,4 +6,5 @@ grpcio==1.48.2; python_version < "3.11"
 grpcio>=1.60,<2; python_version >= "3.11"
 protobuf==3.20.3
 dataclasses==0.8; python_version < "3.7"
+sphinx
 
