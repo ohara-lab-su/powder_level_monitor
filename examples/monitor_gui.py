@@ -146,6 +146,7 @@ class PowderMonitorGui(QtWidgets.QMainWindow):
 
         self._latest_frame = None
         self._latest_frame_id = None
+        self._latest_measurement = {}
         self._server_roi_points = []
         self._editing_points = []
         self._editing_roi = False
@@ -380,8 +381,13 @@ class PowderMonitorGui(QtWidgets.QMainWindow):
         try:
             status = self._client.get_status()
             measurement = self._client.get_measurement()
-            self._server_roi_points = status.get("roi_points", [])
 
+            self._latest_measurement = measurement
+
+            self._server_roi_points = status.get(
+                "roi_points",
+                [],
+            )
             if measurement.get("measuring"):
                 measurement_state = "測定中"
             else:
@@ -475,7 +481,59 @@ class PowderMonitorGui(QtWidgets.QMainWindow):
             (0, 255, 255),
         )
 
-        rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+        #
+        # Baseline（赤）
+        #
+        if self._latest_measurement.get(
+            "baseline_detected",
+        ):
+            baseline_y = int(
+                self._latest_measurement.get(
+                    "baseline_level_y",
+                )
+            )
+
+            cv2.line(
+                frame,
+                (0, baseline_y),
+                (
+                    frame.shape[1] - 1,
+                    baseline_y,
+                ),
+                (0, 0, 255),
+                2,
+                cv2.LINE_AA,
+            )
+
+        #
+        # 現在粉面（青）
+        #
+        if self._latest_measurement.get(
+            "current_detected",
+        ):
+            current_y = int(
+                self._latest_measurement.get(
+                    "level_y",
+                )
+            )
+
+            cv2.line(
+                frame,
+                (0, current_y),
+                (
+                    frame.shape[1] - 1,
+                    current_y,
+                ),
+                (255, 0, 0),
+                2,
+                cv2.LINE_AA,
+            )
+
+        rgb = cv2.cvtColor(
+            frame,
+            cv2.COLOR_BGR2RGB,
+        )
+
         height = int(rgb.shape[0])
         width = int(rgb.shape[1])
         bytes_per_line = int(rgb.strides[0])
