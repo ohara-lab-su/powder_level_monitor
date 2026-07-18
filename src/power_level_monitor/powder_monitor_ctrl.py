@@ -1,4 +1,3 @@
-import base64
 import threading
 import time
 from dataclasses import asdict
@@ -26,9 +25,11 @@ class PowderControlDeviceClass:
         logger: Optional[Any] = None,
     ) -> None:
         if logger is None:
-            import logging
-            logging.basicConfig(level=logging.INFO)
-            logger = logging.getLogger(__name__)
+            from x_logger import XLogger
+            logger = XLogger(
+                log_level="debug",
+                logger_name=self.__class__.__name__,
+            )
 
         self._logger = logger
         self._image_source = image_source
@@ -348,50 +349,6 @@ class PowderControlDeviceClass:
             "measurement": self.get_measurement(),
             "image_source": self._image_source.get_status(),
             "last_error": last_error,
-        }
-
-    def get_monitor_frame(self) -> Dict[str, Any]:
-        frame = self._image_source.get_latest_frame()
-        if frame is None:
-            return {
-                "jpeg_base64": None,
-                "frame_id": None,
-                "roi_points": self.get_roi_points(),
-                "measurement": self.get_measurement(),
-            }
-
-        preview = frame.copy()
-        roi_points = self.get_roi_points()
-        if len(roi_points) == 4:
-            polygon = np.array(roi_points, dtype=np.int32).reshape((-1, 1, 2))
-            cv2.polylines(preview, [polygon], True, (0, 255, 0), 2)
-
-        measurement = self.get_measurement()
-        status_text = "state={} detected={} decrease_mm={}".format(
-            self.get_status().get("state"),
-            measurement.get("detected"),
-            measurement.get("decrease_mm"),
-        )
-        cv2.putText(
-            preview,
-            status_text,
-            (10, 25),
-            cv2.FONT_HERSHEY_SIMPLEX,
-            0.55,
-            (0, 255, 0),
-            1,
-            cv2.LINE_AA,
-        )
-        encode_params = [int(cv2.IMWRITE_JPEG_QUALITY), 85]
-        ok, encoded = cv2.imencode(".jpg", preview, encode_params)
-        if not ok:
-            raise RuntimeError("Failed to encode monitor frame.")
-        image_status = self._image_source.get_status()
-        return {
-            "jpeg_base64": base64.b64encode(encoded.tobytes()).decode("ascii"),
-            "frame_id": image_status.get("frame_id"),
-            "roi_points": roi_points,
-            "measurement": measurement,
         }
 
     def _start_processing_loop(self) -> bool:

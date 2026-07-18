@@ -1,87 +1,66 @@
-from ese774_frame.api_server import FastApiServer
-from ese774_frame.routers.device_router import DeviceRouter
 from grpc_frame.event_bus import EventBus
 from grpc_frame.grpc_server import create_grpc_server
 from x_logger import XLogger
 
-from power_level_monitor.image_stream_ctrl import ImageStreamDeviceClass
-from power_level_monitor.powder_monitor_ctrl import PowderControlDeviceClass
-from power_level_monitor.server_fastapi.api_spec import API_SPEC
+from power_level_monitor.powder_level_device import PowderLevelDeviceClass
 
 
-FASTAPI_HOST = "0.0.0.0"
-FASTAPI_PORT = 8774
 GRPC_HOST = "0.0.0.0"
 GRPC_PORT = 50051
 CAMERA_ID = 0
+MAX_MESSAGE_MB = 64
 
 
-def main() -> None:
+def main():
     logger = XLogger(
         log_level="debug",
         logger_name="PowderLevelServer",
     )
     logger.info("<POWDER SERVER ACTION> startup")
 
-    image_device = ImageStreamDeviceClass(
+    device = PowderLevelDeviceClass(
         camera_id=CAMERA_ID,
-        topic_name="camera.frame",
-        interval_sec=0.1,
+        image_topic="camera.frame",
+        image_interval_sec=0.1,
         capture_interval_sec=0.03,
+        measurement_interval_sec=0.1,
         jpeg_quality=85,
         logger=logger,
     )
-
     event_bus = EventBus()
-    grpc_server = create_grpc_server(
-        ctrl_obj=image_device,
+    max_message_bytes = MAX_MESSAGE_MB * 1024 * 1024
+    server = create_grpc_server(
+        ctrl_obj=device,
         event_bus=event_bus,
         max_workers=10,
+        logger=logger,
         log_level="INFO",
+        grpc_options=(
+            ("grpc.max_send_message_length", max_message_bytes),
+            ("grpc.max_receive_message_length", max_message_bytes),
+        ),
     )
-    grpc_server.add_insecure_port(
+    server.add_insecure_port(
         "{}:{}".format(GRPC_HOST, GRPC_PORT),
     )
-    grpc_server.start()
-    logger.info(
-        "<POWDER SERVER ACTION> grpc_frame started: {}:{}".format(
-            GRPC_HOST,
-            GRPC_PORT,
-        )
-    )
-
-    if not image_device.connect():
-        status = image_device.get_status()
-        grpc_server.stop(grace=1.0)
-        raise RuntimeError(str(status.get("last_error")))
-
-    image_device.start_stream()
-
-    fastapi_server = FastApiServer(
-        device_cls=PowderControlDeviceClass,
-        router_cls=DeviceRouter,
-        config=None,
-        api_spec=API_SPEC,
-        device_kwargs={
-            "image_source": image_device,
-            "measurement_interval_sec": 0.1,
-            "logger": logger,
-        },
-        logger_name="PowderControlFastApiServer",
-        log_level="INFO",
-        lifespan_msg_prefix="POWDER_CONTROL",
-    )
+    server.start()
 
     try:
-        fastapi_server.run(
-            host=FASTAPI_HOST,
-            port=FASTAPI_PORT,
-            reload=False,
+        if not device.connect():
+            raise RuntimeError(str(device.get_status()))
+        logger.info(
+            "<POWDER SERVER ACTION> grpc_frame started: {}:{}".format(
+                GRPC_HOST,
+                GRPC_PORT,
+            )
         )
+        server.wait_for_termination()
+    except KeyboardInterrupt:
+        logger.info("<POWDER SERVER ACTION> KeyboardInterrupt")
     finally:
         logger.info("<POWDER SERVER ACTION> shutdown")
-        image_device.disconnect()
-        grpc_server.stop(grace=1.0)
+        device.disconnect()
+        server.stop(grace=1.0)
 
 
 if __name__ == "__main__":
