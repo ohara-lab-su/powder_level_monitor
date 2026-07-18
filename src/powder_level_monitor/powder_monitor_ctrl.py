@@ -1,3 +1,5 @@
+
+"""カメラ画像から粉体表面を検出し、Baselineからの減少量を算出する。"""
 import threading
 import time
 from dataclasses import asdict
@@ -13,7 +15,7 @@ from power_level_monitor.image_stream_ctrl import ImageStreamDeviceClass
 
 
 class PowderControlDeviceClass:
-    """サーバーローカル画像を用いて粉体レベルを測定する。"""
+    """カメラ画像を透視補正して粉体表面を検出し、Baselineからの減少量を算出する。"""
 
     RECTIFIED_WIDTH = 360
     RECTIFIED_HEIGHT = 720
@@ -24,6 +26,13 @@ class PowderControlDeviceClass:
         measurement_interval_sec: float = 0.1,
         logger: Optional[Any] = None,
     ) -> None:
+        """粉体表面測定の状態、調整値、および解析スレッドを初期化する。
+        
+        Args:
+            image_source: 最新画像を供給する画像取得デバイス。省略時は内部で生成する。
+            measurement_interval_sec: 画像解析ループの実行周期（秒）。
+            logger: 画像取得デバイスと共有するロガー。
+        """
         if logger is None:
             from x_logger import XLogger
             logger = XLogger(
@@ -68,6 +77,11 @@ class PowderControlDeviceClass:
         self._logger.info("<POWDER ACTION> PowderControlDeviceClass initialized")
 
     def connect(self) -> bool:
+        """必要なデバイス接続と内部処理ループを開始する。
+        
+        Returns:
+            接続と起動に成功した場合は True、それ以外は False。
+        """
         self._logger.info("<POWDER ACTION> connect")
         connected = self._image_source.connect()
 
@@ -85,6 +99,11 @@ class PowderControlDeviceClass:
         return connected
 
     def disconnect(self) -> bool:
+        """内部処理ループを停止し、デバイス接続を解放する。
+        
+        Returns:
+            正常に切断処理を完了した場合は True。
+        """
         self._logger.info("<POWDER ACTION> disconnect")
         self.stop_measurement()
         self._stop_processing_loop()
@@ -95,12 +114,27 @@ class PowderControlDeviceClass:
         return disconnected
 
     def start(self) -> bool:
+        """測定処理を開始する互換API。
+        
+        Returns:
+            測定を開始できた場合は True。
+        """
         return self.start_measurement()
 
     def stop(self) -> bool:
+        """測定処理を停止する互換API。
+        
+        Returns:
+            測定停止処理を完了した場合は True。
+        """
         return self.stop_measurement()
 
     def start_measurement(self) -> bool:
+        """ROI、Baseline、最新検出結果を確認して連続測定を開始する。
+        
+        Returns:
+            測定開始条件を満たした場合は True。
+        """
         self._logger.info("<POWDER ACTION> start_measurement")
         if not self.connect():
             return False
@@ -131,6 +165,11 @@ class PowderControlDeviceClass:
         return True
 
     def stop_measurement(self) -> bool:
+        """連続測定フラグを解除する。
+        
+        Returns:
+            常に True。
+        """
         self._logger.info("<POWDER ACTION> stop_measurement")
         with self._lock:
             self._measuring = False
@@ -138,10 +177,20 @@ class PowderControlDeviceClass:
         return True
 
     def is_measuring(self) -> bool:
+        """現在の連続測定状態を取得する。
+        
+        Returns:
+            測定中の場合は True。
+        """
         with self._lock:
             return bool(self._measuring)
 
     def process_once(self) -> bool:
+        """最新カメラ画像を1枚処理し、粉体表面と減少量を更新する。
+        
+        Returns:
+            有効な粉体表面を検出できた場合は True。
+        """
         frame = self._image_source.get_latest_frame()
         if frame is None:
             with self._lock:
@@ -159,6 +208,7 @@ class PowderControlDeviceClass:
             controls = ControlValues(**asdict(self._control_values))
             baseline_level_y = self._baseline_level_y
 
+        # 透視変換は四角形の4頂点が揃わなければ定義できない。
         if len(roi_points) != 4:
             with self._lock:
                 self._latest_detected = False
@@ -199,6 +249,7 @@ class PowderControlDeviceClass:
                 self._timestamp_ns = int(time.time() * 1000000000)
             return False
 
+        # 補正画像では下方向が正なので、粉面低下時に差分が正値となる。
         decrease_mm = None
         if baseline_level_y is not None:
             decrease_mm = self._pixel_delta_to_mm(
@@ -219,6 +270,17 @@ class PowderControlDeviceClass:
         return True
 
     def set_roi_points(self, points: List[List[int]]) -> bool:
+        """透視変換に使用する4点のROI座標を設定する。
+        
+        Args:
+            points: 画像座標系の4点。各点は ``[x, y]`` で指定する。
+        
+        Returns:
+            設定に成功した場合は True。
+        
+        Raises:
+            ValueError: 点数が4点でない、または各点が2要素でない場合。
+        """
         self._logger.info("<POWDER ACTION> set_roi_points: {}".format(points))
         if len(points) != 4:
             raise ValueError("ROI points must contain four points.")
@@ -245,6 +307,11 @@ class PowderControlDeviceClass:
         return True
 
     def get_roi_points(self) -> List[List[int]]:
+        """現在設定されているROI座標のコピーを取得する。
+        
+        Returns:
+            画像座標系のROI座標。
+        """
         copied_points = []
         with self._lock:
             for point in self._roi_points:
@@ -252,6 +319,11 @@ class PowderControlDeviceClass:
         return copied_points
 
     def clear_roi_points(self) -> bool:
+        """ROIとROIに依存するBaselineおよび測定結果を消去する。
+        
+        Returns:
+            常に True。
+        """
         self._logger.info("<POWDER ACTION> clear_roi_points")
         with self._lock:
             self._roi_points = []
@@ -268,6 +340,11 @@ class PowderControlDeviceClass:
         return True
 
     def set_baseline(self) -> bool:
+        """最新の有効な粉体表面位置をBaselineとして保存する。
+        
+        Returns:
+            Baselineを設定できた場合は True。
+        """
         self._logger.info("<POWDER ACTION> set_baseline")
         self.process_once()
         with self._lock:
@@ -286,6 +363,11 @@ class PowderControlDeviceClass:
         return True
 
     def clear_baseline(self) -> bool:
+        """BaselineとBaselineに依存する減少量を消去する。
+        
+        Returns:
+            常に True。
+        """
         self._logger.info("<POWDER ACTION> clear_baseline")
         with self._lock:
             self._baseline_level_y = None
@@ -297,10 +379,27 @@ class PowderControlDeviceClass:
         return True
 
     def get_baseline(self) -> Optional[float]:
+        """現在のBaseline位置を取得する。
+        
+        Returns:
+            補正画像座標系のBaselineのY座標。未設定時は None。
+        """
         with self._lock:
             return self._baseline_level_y
 
     def set_detector_params(self, params: Dict[str, Any]) -> bool:
+        """粉体表面検出パラメータを検証して更新する。
+        
+        Args:
+            params: 更新するパラメータ名と値の辞書。
+        
+        Returns:
+            更新に成功した場合は True。
+        
+        Raises:
+            KeyError: 未知のパラメータ名が含まれる場合。
+            ValueError: 値が許容範囲外の場合。
+        """
         valid_names = set()
         for field in fields(ControlValues):
             valid_names.add(field.name)
@@ -319,10 +418,20 @@ class PowderControlDeviceClass:
         return True
 
     def get_detector_params(self) -> Dict[str, Any]:
+        """現在の粉体表面検出パラメータを取得する。
+        
+        Returns:
+            検出パラメータの辞書。
+        """
         with self._lock:
             return asdict(self._control_values)
 
     def get_measurement(self) -> Dict[str, Any]:
+        """最新の粉体表面検出結果とBaseline差分を取得する。
+        
+        Returns:
+            測定値、検出線、時刻、エラー状態を格納した辞書。
+        """
         with self._lock:
             surface_data = None
             if self._latest_surface is not None:
@@ -392,6 +501,11 @@ class PowderControlDeviceClass:
             }
 
     def get_status(self) -> Dict[str, Any]:
+        """接続、処理ループ、ROI、測定状態をまとめて取得する。
+        
+        Returns:
+            制御対象の状態を格納した辞書。
+        """
         with self._lock:
             connected = self._connected
             processing_running = self._processing_running
@@ -425,6 +539,11 @@ class PowderControlDeviceClass:
         }
 
     def _start_processing_loop(self) -> bool:
+        """最新画像を継続解析するデーモンスレッドを開始する。
+        
+        Returns:
+            開始済みまたは開始に成功した場合は True。
+        """
         with self._lock:
             if self._processing_running:
                 return True
@@ -440,6 +559,11 @@ class PowderControlDeviceClass:
         return True
 
     def _stop_processing_loop(self) -> bool:
+        """画像解析スレッドへ停止を通知し、終了を待機する。
+        
+        Returns:
+            停止処理を完了した場合は True。
+        """
         self._stop_event.set()
         thread = self._thread
         if thread is not None:
@@ -452,6 +576,7 @@ class PowderControlDeviceClass:
         return True
 
     def _measurement_loop(self) -> None:
+        """停止要求まで最新画像の解析を一定周期で実行する。"""
         while not self._stop_event.is_set():
             self.process_once()
             time.sleep(self._measurement_interval_sec)
@@ -468,6 +593,16 @@ class PowderControlDeviceClass:
         Optional[Tuple[int, int]],
         Optional[Tuple[int, int]],
     ]:
+        """ROIを矩形へ透視変換し、粉体マスクと表面直線を算出する。
+        
+        Args:
+            frame: 入力となるBGR画像。
+            roi_points: 透視変換元となる画像座標系の4点。
+            controls: 検出アルゴリズムの調整値。
+        
+        Returns:
+            検出結果、補正画像上の中心Y座標、元画像上の左右端点。検出失敗時は検出結果が None。
+        """
         matrix: np.ndarray = self._create_perspective_matrix(roi_points)
         rectified: np.ndarray = cv2.warpPerspective(
             frame,
@@ -532,6 +667,15 @@ class PowderControlDeviceClass:
         self,
         roi_points: List[List[int]],
     ) -> np.ndarray:
+        """4点ROIを固定サイズの長方形へ写す透視変換行列を作成する。
+        
+        Args:
+            roi_points: 元画像上の4点。
+        
+        Returns:
+            透視変換行列とその逆行列。
+        """
+        # GUIで指定された4点の順序を維持して、固定寸法の長方形へ対応付ける。
         source_points = np.array(
             roi_points,
             dtype=np.float32,
@@ -559,6 +703,15 @@ class PowderControlDeviceClass:
         rectified: np.ndarray,
         controls: ControlValues,
     ) -> Tuple[np.ndarray, Tuple[int, int, int, int]]:
+        """補正画像の外周を比率指定で除外し、検出対象領域を切り出す。
+        
+        Args:
+            rectified: 透視補正済み画像。
+            controls: 外周除外率を含む調整値。
+        
+        Returns:
+            切り出した画像と補正画像上の矩形座標。
+        """
         height, width = rectified.shape[:2]
         margin_x: int = int(width * controls.margin_x_ratio)
         margin_y: int = int(height * controls.margin_y_ratio)
@@ -584,6 +737,16 @@ class PowderControlDeviceClass:
         inner_roi: np.ndarray,
         controls: ControlValues,
     ) -> np.ndarray:
+        """輝度補正、平滑化、二値化、モルフォロジー処理で粉体候補マスクを作る。
+        
+        Args:
+            inner_roi: 検出対象として切り出したBGR画像。
+            controls: 二値化方式とカーネルサイズを含む調整値。
+        
+        Returns:
+            粉体候補を255とする8ビット二値画像。
+        """
+        # 色情報を捨て、照明むらをCLAHEで緩和してから二値化する。
         gray: np.ndarray = cv2.cvtColor(
             inner_roi,
             cv2.COLOR_BGR2GRAY,
@@ -668,9 +831,19 @@ class PowderControlDeviceClass:
         mask: np.ndarray,
         controls: ControlValues,
     ) -> np.ndarray:
+        """各列を上から走査し、縦方向に連続性がある最上端点を抽出する。
+        
+        Args:
+            mask: 粉体候補の二値画像。
+            controls: 連続性判定に使用する行数を含む調整値。
+        
+        Returns:
+            表面候補点のN×2配列。
+        """
         height, width = mask.shape[:2]
         points: List[Tuple[int, int]] = []
 
+        # 各列の最上端から、一定行数以上連続する白画素の開始点を表面候補とする。
         for x in range(width):
             column = mask[:, x] > 0
             ys = np.where(column)[0]
@@ -696,6 +869,14 @@ class PowderControlDeviceClass:
         self,
         points: np.ndarray,
     ) -> np.ndarray:
+        """Y座標の中央値とMADを用いて表面候補点の外れ値を除去する。
+        
+        Args:
+            points: 表面候補点のN×2配列。
+        
+        Returns:
+            外れ値を除去した候補点。
+        """
         if len(points) < 5:
             return points
 
@@ -709,6 +890,7 @@ class PowderControlDeviceClass:
         else:
             limit = max(8.0, mad * 3.0)
 
+        # 標準偏差より外れ値に頑健なMADを使用し、局所的なノイズを除外する。
         keep = deviation <= limit
         return points[keep]
 
@@ -717,6 +899,15 @@ class PowderControlDeviceClass:
         mask: np.ndarray,
         controls: ControlValues,
     ) -> Optional[SurfaceDetection]:
+        """面積、行占有率、点数を検証し、候補点へ直線を当てはめる。
+        
+        Args:
+            mask: 粉体候補の二値画像。
+            controls: 検出成立条件を含む調整値。
+        
+        Returns:
+            表面直線の検出結果。成立しない場合は None。
+        """
         mask_area: int = int(cv2.countNonZero(mask))
 
         if mask_area < controls.min_area:
@@ -737,6 +928,7 @@ class PowderControlDeviceClass:
         if len(points) < max(12, width * 0.08):
             return None
 
+        # 個々の候補点の凹凸を平均化し、粉面を一本の直線として表現する。
         line = cv2.fitLine(
             points,
             cv2.DIST_L2,
@@ -780,6 +972,16 @@ class PowderControlDeviceClass:
         baseline_y: float,
         controls: ControlValues,
     ) -> float:
+        """補正画像のY座標差を実寸の粉体減少量へ換算する。
+        
+        Args:
+            current_level_y: 現在の粉体表面Y座標。
+            baseline_y: Baselineの粉体表面Y座標。
+            controls: 測定高さの実寸値を含む調整値。
+        
+        Returns:
+            Baselineからの減少量。画像下方向を正とする。
+        """
         mm_per_pixel: float = (
             controls.measure_height_mm
             / float(self.RECTIFIED_HEIGHT)
@@ -799,6 +1001,17 @@ class PowderControlDeviceClass:
         frame_id: Optional[int],
         frame_time_ns: Optional[int],
     ) -> None:
+        """検出結果とフレーム情報を排他制御下で最新値へ反映する。
+        
+        Args:
+            surface: 粉体表面の検出結果。
+            level_y: 補正画像上の中心Y座標。
+            line_left: 元画像上の検出線左端。
+            line_right: 元画像上の検出線右端。
+            decrease_mm: Baselineからの減少量。
+            frame_id: 解析元カメラフレームID。
+            frame_time_ns: 解析元フレームの取得時刻。
+        """
         with self._lock:
             self._latest_surface = surface
             self._latest_level_y = float(level_y)
@@ -815,6 +1028,18 @@ class PowderControlDeviceClass:
         self,
         params: Dict[str, Any],
     ) -> ControlValues:
+        """部分更新値を既存設定へ重ね、型変換と範囲検証を行う。
+        
+        Args:
+            params: 更新対象のパラメータ。
+        
+        Returns:
+            検証済みの調整値。
+        
+        Raises:
+            KeyError: 未知のパラメータ名が指定された場合。
+            ValueError: パラメータ値が許容範囲外の場合。
+        """
         with self._lock:
             current_values: Dict[str, Any] = asdict(
                 self._control_values,
@@ -896,6 +1121,11 @@ class PowderControlDeviceClass:
         )
 
     def _get_control_value_names(self) -> Set[str]:
+        """ControlValuesで定義されている有効なフィールド名を取得する。
+        
+        Returns:
+            有効なパラメータ名の集合。
+        """
         control_value_names: Set[str] = set()
 
         for field_info in fields(ControlValues):
@@ -907,6 +1137,14 @@ class PowderControlDeviceClass:
         self,
         value: Any,
     ) -> int:
+        """画像処理カーネルに使用できる1以上の奇数へ正規化する。
+        
+        Args:
+            value: 正規化する数値。
+        
+        Returns:
+            1以上の奇数。
+        """
         odd_value: int = max(1, int(value))
 
         if odd_value % 2 == 0:

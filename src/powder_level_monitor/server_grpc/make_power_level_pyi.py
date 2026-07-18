@@ -1,6 +1,8 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 
+"""grpc_frame の動的クライアント用型スタブを生成するスクリプト。"""
+
 from __future__ import annotations
 
 import pathlib
@@ -11,6 +13,7 @@ from grpc_frame.make_pyi import generate_client_pyi
 
 def main() -> None:
     # 現在のディレクトリ
+    """エントリーポイントを実行する。"""
     base = pathlib.Path(__file__).resolve().parent
 
     # Package 内の GrpcFrame の場所
