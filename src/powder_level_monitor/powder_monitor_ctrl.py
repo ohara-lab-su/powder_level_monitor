@@ -7,9 +7,9 @@ from typing import Any, Dict, List, Optional, Set, Tuple
 import cv2
 import numpy as np
 
-from power_level_monitor.data_control_values import ControlValues
-from power_level_monitor.data_surface_detection import SurfaceDetection
-from power_level_monitor.image_stream_ctrl import ImageStreamDeviceClass
+from powder_level_monitor.data_control_values import ControlValues
+from powder_level_monitor.data_surface_detection import SurfaceDetection
+from powder_level_monitor.image_stream_ctrl import ImageStreamDeviceClass
 
 
 class PowderControlDeviceClass:

@@ -9,7 +9,7 @@ from PySide6 import QtCore
 from PySide6 import QtGui
 from PySide6 import QtWidgets
 
-from power_level_monitor.grpc_client import PowderLevelGrpcClient
+from powder_level_monitor.server_grpc.grpc_client import PowderLevelGrpcClient
 from x_logger import XLogger
 
 

@@ -2,8 +2,8 @@
 # -*- coding: utf-8 -*-
 """Camera streaming and powder measurement device."""
 
-from power_level_monitor.image_stream_ctrl import ImageStreamDeviceClass
-from power_level_monitor.powder_monitor_ctrl import PowderControlDeviceClass
+from powder_level_monitor.image_stream_ctrl import ImageStreamDeviceClass
+from powder_level_monitor.powder_monitor_ctrl import PowderControlDeviceClass
 
 
 class PowderLevelDeviceClass:
