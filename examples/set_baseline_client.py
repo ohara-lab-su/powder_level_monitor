@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 
-from powder_level_monitor.grpc_client import PowderLevelGrpcClient
+from powder_level_monitor.server_grpc import PowderLevelGrpcClient
 from x_logger import XLogger
 
 

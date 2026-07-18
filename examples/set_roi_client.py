@@ -4,7 +4,7 @@
 import json
 import os
 
-from powder_level_monitor.grpc_client import PowderLevelGrpcClient
+from powder_level_monitor.server_grpc import PowderLevelGrpcClient
 from x_logger import XLogger
 
 
