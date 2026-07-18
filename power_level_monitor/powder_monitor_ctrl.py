@@ -39,8 +39,11 @@ class PowderControlDeviceClass:
         self._measurement_interval_sec = float(measurement_interval_sec)
         self._roi_points = []
         self._baseline_level_y = None
+        self._baseline_detected = False
         self._latest_level_y = None
+        self._latest_decrease_px = None
         self._latest_decrease_mm = None
+        self._latest_decrease_ratio = None
         self._latest_surface = None
         self._latest_detected = False
         self._latest_frame_id = None
@@ -186,18 +189,24 @@ class PowderControlDeviceClass:
                 self._timestamp_ns = int(time.time() * 1000000000)
             return False
 
+        decrease_px = None
         decrease_mm = None
+        decrease_ratio = None
         if baseline_level_y is not None:
+            decrease_px = float(current_level_y - baseline_level_y)
             decrease_mm = self._pixel_delta_to_mm(
                 current_level_y=current_level_y,
                 baseline_y=baseline_level_y,
                 controls=controls,
             )
+            decrease_ratio = decrease_px / float(self.RECTIFIED_HEIGHT)
 
         self._update_measurement(
             surface=surface,
             level_y=current_level_y,
+            decrease_px=decrease_px,
             decrease_mm=decrease_mm,
+            decrease_ratio=decrease_ratio,
             frame_id=frame_id,
             frame_time_ns=frame_time_ns,
         )
@@ -217,7 +226,10 @@ class PowderControlDeviceClass:
         with self._lock:
             self._roi_points = normalized_points
             self._baseline_level_y = None
+            self._baseline_detected = False
+            self._latest_decrease_px = None
             self._latest_decrease_mm = None
+            self._latest_decrease_ratio = None
             self._latest_detected = False
             self._latest_surface = None
             self._measuring = False
@@ -237,7 +249,10 @@ class PowderControlDeviceClass:
         with self._lock:
             self._roi_points = []
             self._baseline_level_y = None
+            self._baseline_detected = False
+            self._latest_decrease_px = None
             self._latest_decrease_mm = None
+            self._latest_decrease_ratio = None
             self._latest_detected = False
             self._latest_surface = None
             self._measuring = False
@@ -249,13 +264,18 @@ class PowderControlDeviceClass:
         self.process_once()
         with self._lock:
             if not self._latest_detected:
+                self._baseline_detected = False
                 self._last_error = "No valid measurement is available."
                 return False
             if self._latest_level_y is None:
+                self._baseline_detected = False
                 self._last_error = "No valid measurement is available."
                 return False
             self._baseline_level_y = self._latest_level_y
+            self._baseline_detected = True
+            self._latest_decrease_px = 0.0
             self._latest_decrease_mm = 0.0
+            self._latest_decrease_ratio = 0.0
             self._timestamp_ns = int(time.time() * 1000000000)
             self._last_error = None
         return True
@@ -264,7 +284,10 @@ class PowderControlDeviceClass:
         self._logger.info("<POWDER ACTION> clear_baseline")
         with self._lock:
             self._baseline_level_y = None
+            self._baseline_detected = False
+            self._latest_decrease_px = None
             self._latest_decrease_mm = None
+            self._latest_decrease_ratio = None
             self._measuring = False
             self._timestamp_ns = int(time.time() * 1000000000)
         return True
@@ -307,9 +330,14 @@ class PowderControlDeviceClass:
                 }
             return {
                 "measuring": self._measuring,
+                "baseline_set": self._baseline_level_y is not None,
+                "baseline_detected": self._baseline_detected,
+                "current_detected": self._latest_detected,
                 "detected": self._latest_detected,
                 "level_y": self._latest_level_y,
+                "decrease_px": self._latest_decrease_px,
                 "decrease_mm": self._latest_decrease_mm,
+                "decrease_ratio": self._latest_decrease_ratio,
                 "baseline_level_y": self._baseline_level_y,
                 "surface": surface_data,
                 "frame_id": self._latest_frame_id,
@@ -684,14 +712,18 @@ class PowderControlDeviceClass:
         self,
         surface: SurfaceDetection,
         level_y: float,
+        decrease_px: Optional[float],
         decrease_mm: Optional[float],
+        decrease_ratio: Optional[float],
         frame_id: Optional[int],
         frame_time_ns: Optional[int],
     ) -> None:
         with self._lock:
             self._latest_surface = surface
             self._latest_level_y = float(level_y)
+            self._latest_decrease_px = decrease_px
             self._latest_decrease_mm = decrease_mm
+            self._latest_decrease_ratio = decrease_ratio
             self._latest_detected = True
             self._latest_frame_id = frame_id
             self._latest_frame_time_ns = frame_time_ns

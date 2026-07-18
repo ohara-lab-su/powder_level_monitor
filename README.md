@@ -97,3 +97,22 @@ pip install -r requirements.txt
 ```
 
 PythonソースはPython 3.6の構文で検査しています。依存パッケージはPythonバージョン別の条件を `requirements.txt` に記載しています。
+
+## 測定結果
+
+`get_measurement()` は、GUIとCLIで共通して使用する測定結果を返します。
+
+主な戻り値:
+
+- `measuring`: 測定開始・停止状態
+- `baseline_set`: Baseline値が保持されているか
+- `baseline_detected`: 直近のBaseline設定時に粉面検出できたか
+- `current_detected`: 現在の粉面を検出できたか
+- `baseline_level_y`: Baseline位置
+- `level_y`: 現在の粉面位置
+- `decrease_px`: Baselineからの減少量（pixel）
+- `decrease_mm`: Baselineからの減少量（mm）
+- `decrease_ratio`: 測定高さに対する減少比
+- `last_error`: 検出または操作エラー
+
+GUIは `get_measurement()` を呼び、Baseline検出成否、現在粉面検出成否、Baseline位置、現在位置、減少量、エラーを個別に表示します。測定値の計算はGUI側では行いません。

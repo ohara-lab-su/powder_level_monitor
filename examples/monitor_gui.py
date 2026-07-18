@@ -207,11 +207,23 @@ class PowderMonitorGui(QtWidgets.QMainWindow):
         button_layout.addWidget(measurement_stop_button)
 
         self._status_label = QtWidgets.QLabel("接続中", self)
-        self._measurement_label = QtWidgets.QLabel("", self)
+        self._measurement_state_label = QtWidgets.QLabel("測定状態: 未取得", self)
+        self._baseline_detection_label = QtWidgets.QLabel("Baseline検出: 未取得", self)
+        self._current_detection_label = QtWidgets.QLabel("現在粉面検出: 未取得", self)
+        self._baseline_level_label = QtWidgets.QLabel("Baseline位置: 未設定", self)
+        self._current_level_label = QtWidgets.QLabel("現在粉面位置: 未取得", self)
+        self._decrease_label = QtWidgets.QLabel("減少量: 測定不可", self)
+        self._measurement_error_label = QtWidgets.QLabel("測定エラー: なし", self)
         self._roi_label = QtWidgets.QLabel("ROI: 未取得", self)
 
         main_layout.addWidget(self._status_label)
-        main_layout.addWidget(self._measurement_label)
+        main_layout.addWidget(self._measurement_state_label)
+        main_layout.addWidget(self._baseline_detection_label)
+        main_layout.addWidget(self._current_detection_label)
+        main_layout.addWidget(self._baseline_level_label)
+        main_layout.addWidget(self._current_level_label)
+        main_layout.addWidget(self._decrease_label)
+        main_layout.addWidget(self._measurement_error_label)
         main_layout.addWidget(self._roi_label)
 
     def _start_image_subscription(self):
@@ -319,10 +331,10 @@ class PowderMonitorGui(QtWidgets.QMainWindow):
             if self._client.set_baseline():
                 self._status_label.setText("Baselineを設定しました")
             else:
-                status = self._client.get_status()
+                measurement = self._client.get_measurement()
                 self._status_label.setText(
                     "Baseline設定失敗: {}".format(
-                        status.get("last_error"),
+                        measurement.get("last_error"),
                     )
                 )
         except Exception as exc:
@@ -367,21 +379,74 @@ class PowderMonitorGui(QtWidgets.QMainWindow):
     def _refresh_status(self):
         try:
             status = self._client.get_status()
-            measurement = status.get("measurement", {})
+            measurement = self._client.get_measurement()
             self._server_roi_points = status.get("roi_points", [])
 
-            self._measurement_label.setText(
-                "state={} detected={} level_y={} decrease_mm={} "
-                "baseline={} frame_id={} stream={}".format(
+            if measurement.get("measuring"):
+                measurement_state = "測定中"
+            else:
+                measurement_state = "停止中"
+
+            self._measurement_state_label.setText(
+                "測定状態: {} ({})".format(
+                    measurement_state,
                     status.get("state"),
-                    measurement.get("detected"),
-                    measurement.get("level_y"),
-                    measurement.get("decrease_mm"),
-                    status.get("baseline_level_y"),
-                    self._latest_frame_id,
-                    status.get("image_stream", {}).get("stream_running"),
                 )
             )
+
+            if measurement.get("baseline_detected"):
+                baseline_detection = "成功"
+            elif measurement.get("baseline_set"):
+                baseline_detection = "再設定失敗（既存Baselineあり）"
+            else:
+                baseline_detection = "未設定または検出失敗"
+
+            self._baseline_detection_label.setText(
+                "Baseline検出: {}".format(baseline_detection)
+            )
+
+            if measurement.get("current_detected"):
+                current_detection = "成功"
+            else:
+                current_detection = "失敗"
+
+            self._current_detection_label.setText(
+                "現在粉面検出: {}".format(current_detection)
+            )
+            self._baseline_level_label.setText(
+                "Baseline位置: {} px".format(
+                    measurement.get("baseline_level_y"),
+                )
+            )
+            self._current_level_label.setText(
+                "現在粉面位置: {} px".format(
+                    measurement.get("level_y"),
+                )
+            )
+
+            decrease_px = measurement.get("decrease_px")
+            decrease_mm = measurement.get("decrease_mm")
+            decrease_ratio = measurement.get("decrease_ratio")
+            if decrease_ratio is None:
+                decrease_percent = None
+            else:
+                decrease_percent = float(decrease_ratio) * 100.0
+
+            self._decrease_label.setText(
+                "Baselineからの減少量: {} px / {} mm / {} %".format(
+                    decrease_px,
+                    decrease_mm,
+                    decrease_percent,
+                )
+            )
+
+            last_error = measurement.get("last_error")
+            if last_error:
+                self._measurement_error_label.setText(
+                    "測定エラー: {}".format(last_error)
+                )
+            else:
+                self._measurement_error_label.setText("測定エラー: なし")
 
             if not self._editing_roi:
                 self._roi_label.setText(
