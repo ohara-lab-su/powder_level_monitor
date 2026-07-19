@@ -11,7 +11,7 @@ Powder Level Monitor は、カメラ画像から粉体表面の位置を検出�
 :caption: Contents:
 
 api/modules
-tutorials/index
+tutorials/tutorials
 ```
 ---
 
