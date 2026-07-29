@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "power_level_monitor"
 
-version = "0.0.1"
+version = "0.0.2"
 
 description = "power_level_monitor"
 authors = [
