@@ -1,43 +1,20 @@
 [build-system]
-requires = ["setuptools>=61.0"]
+requires = ["setuptools>=68", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "power_level_monitor"
-
-version = "0.0.2"
-
-description = "power_level_monitor"
-authors = [
-  { name="Kengo NAKADA", email="kengo.nakada@email.com" }
-]
+name = "powder-level-monitor"
+version = "0.1.0"
+description = "Camera-based powder surface level monitoring"
 readme = "README.md"
-requires-python = ">=3.8"
+requires-python = ">=3.10"
 dependencies = [
-"pyserial",
-"nest_asyncio",
-"pydantic",
-"pyyaml",
-"pytest",
-"sphinx",
-"myst-parser",
-"sphinx-autobuild",
-"sphinx-rtd-theme",
-"sphinxcontrib-napoleon",
-"linkify-it-py"
+    "numpy",
+    "opencv-python",
+    "PySide6",
+    "grpc-frame",
+    "x-logger",
 ]
-
-[tool.pytest.ini_options]
-pythonpath = ["src"]
-
-# ここでpytestのiniと同じようにオプションが書ける
-# 例えばテストマーク、フィルタ、カバレッジなども追記可能
-
-[tool.black]
-line-length = 88
-
-[tool.isort]
-profile = "black"
 
 [tool.setuptools.packages.find]
 where = ["src"]

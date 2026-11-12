@@ -1,5 +1,9 @@
-#!/usr/bin/env python3
+#!/usr/bin/env python
 # -*- coding: utf-8 -*-
+
+"""examples/roi.jsonに記載された四隅の座標をgRPCサーバーへ設定する。
+
+roi.jsonは実験環境に合わせて別途用意する。ファイルのpointsキーに四隅の座標を指定する。"""
 
 import json
 import os

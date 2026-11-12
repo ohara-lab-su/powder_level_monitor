@@ -1,5 +1,9 @@
-#!/usr/bin/env python3
+#!/usr/bin/env python
 # -*- coding: utf-8 -*-
+
+"""gRPCサーバーから最新の粉面測定結果を取得し、JSON形式で表示する。
+
+測定を開始するスクリプトではない。測定の有効性は結果の検出状態を確認する。"""
 
 import json
 

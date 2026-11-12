@@ -45,11 +45,7 @@ jobs:
           LANG: C.UTF-8
           LC_ALL: C.UTF-8
         run: |
-          rm -rf _build api
-          mkdir -p api
-          sphinx-apidoc -f -o api ../src
-          sphinx-build -b html . _build/html
-          touch _build/html/.nojekyll
+          bash build.sh
 
       - name: Upload artifact
         uses: actions/upload-pages-artifact@v3

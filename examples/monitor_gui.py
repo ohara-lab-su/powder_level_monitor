@@ -1,5 +1,9 @@
-#!/usr/bin/env python3
+#!/usr/bin/env python
 # -*- coding: utf-8 -*-
+
+"""gRPC経由でカメラ画像を購読し、ROI・Baseline・測定開始停止を操作するGUI。
+
+サーバーを別途起動する。画像取得・粉面認識の実装はサーバー側で行う。"""
 
 """粉体レベル監視サーバーを操作し、画像と測定結果を表示するGUIを提供する。"""
 
@@ -11,7 +15,7 @@ from PySide6 import QtCore
 from PySide6 import QtGui
 from PySide6 import QtWidgets
 
-from power_level_monitor.grpc_client import PowderLevelGrpcClient
+from powder_level_monitor.server_grpc import PowderLevelGrpcClient
 from x_logger import XLogger
 
 

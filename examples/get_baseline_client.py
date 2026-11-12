@@ -1,5 +1,9 @@
-#!/usr/bin/env python3
+#!/usr/bin/env python
 # -*- coding: utf-8 -*-
+
+"""gRPCサーバーに保存されているBaselineの位置を取得して表示する。
+
+事前にサーバーを起動する。Baselineが未設定の場合はNoneが返る。"""
 
 from powder_level_monitor.server_grpc import PowderLevelGrpcClient
 from x_logger import XLogger

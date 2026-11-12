@@ -1,37 +1,13 @@
 #!/usr/bin/env bash
 set -euo pipefail
-
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-DOCS_DIR="$SCRIPT_DIR"
+DOCS_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROOT_DIR="$(cd "$DOCS_DIR/.." && pwd)"
-SRC_DIR="$ROOT_DIR/src"
-
-PKG_NAME="powder_level_monitor"   # パッケージ名を明示
-
-export PYTHONPATH="$SRC_DIR:${PYTHONPATH:-}"
-
-echo "Cleaning build..."
-rm -rf "$DOCS_DIR/_build" "$DOCS_DIR/api"
-mkdir -p "$DOCS_DIR/api" "$DOCS_DIR/_static"
-
-echo "Generating API stubs with sphinx-apidoc..."
-sphinx-apidoc -o "$DOCS_DIR/api" "$SRC_DIR/$PKG_NAME" -f --module-first
-
-echo "Building HTML..."
-sphinx-build -b html "$DOCS_DIR" "$DOCS_DIR/_build/html"
-
-# GitHub Pages が Jekyll で _static 等を落とすのを防ぐ（デプロイ方法に依らず害なし）
-: > "$DOCS_DIR/.nojekyll"
-: > "$DOCS_DIR/_build/html/.nojekyll"
-
-echo "Creating local redirect index.html..."
-cat > "$DOCS_DIR/index.html" << 'HTML'
-<!doctype html>
-<meta charset="utf-8">
-<meta http-equiv="refresh" content="0; url=./_build/html/">
-<link rel="canonical" href="./_build/html/">
-<title>Redirecting…</title>
-<p>Redirecting to <a href="./_build/html/">./_build/html/</a></p>
-HTML
-
-echo "Done."
+export PYTHONPATH="$ROOT_DIR/src:${PYTHONPATH:-}"
+rm -rf "$DOCS_DIR/_build" "$DOCS_DIR/en/api" "$DOCS_DIR/ja/api"
+mkdir -p "$DOCS_DIR/_build/html" "$DOCS_DIR/en/api" "$DOCS_DIR/ja/api"
+for lang in en ja; do
+  sphinx-apidoc -f -o "$DOCS_DIR/$lang/api" "$ROOT_DIR/src/powder_level_monitor"
+  sphinx-build -b html -c "$DOCS_DIR" -D language="$lang" "$DOCS_DIR/$lang" "$DOCS_DIR/_build/html/$lang"
+done
+cp -R "$DOCS_DIR/_build/html/en/." "$DOCS_DIR/_build/html/"
+touch "$DOCS_DIR/_build/html/.nojekyll"
