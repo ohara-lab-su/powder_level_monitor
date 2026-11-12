@@ -1,5 +1,9 @@
-#!/usr/bin/env python3
+#!/usr/bin/env python
 # -*- coding: utf-8 -*-
+
+"""gRPCサーバーに粉面測定の開始を指示する。
+
+ROIとBaselineなどの必要条件が満たされない場合はサーバー側のエラーを表示する。"""
 
 from powder_level_monitor.server_grpc import PowderLevelGrpcClient
 from x_logger import XLogger

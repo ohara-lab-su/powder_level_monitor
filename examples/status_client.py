@@ -1,5 +1,9 @@
-#!/usr/bin/env python3
+#!/usr/bin/env python
 # -*- coding: utf-8 -*-
+
+"""gRPCサーバーの測定制御状態を取得し、JSON形式で表示する。
+
+測定値の取得はmeasurement_client.pyを使用する。"""
 
 import json
 

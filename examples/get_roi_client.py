@@ -1,5 +1,9 @@
-#!/usr/bin/env python3
+#!/usr/bin/env python
 # -*- coding: utf-8 -*-
+
+"""gRPCサーバーに設定されているROIの四隅の座標を取得して表示する。
+
+ROIは原画像のピクセル座標で表現される。"""
 
 from powder_level_monitor.server_grpc import PowderLevelGrpcClient
 from x_logger import XLogger

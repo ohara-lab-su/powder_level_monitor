@@ -2,7 +2,7 @@
 # -*- coding: utf-8 -*-
 """画像配信と粉体レベル測定を統合して gRPC 公開するサービスを提供する。"""
 
-from powder_level_monitor.image_stream_ctrl import ImageStreamDeviceClass
+from powder_level_monitor.image_stream import ImageStream
 from powder_level_monitor.powder_monitor_ctrl import PowderControlDeviceClass
 
 
@@ -39,7 +39,7 @@ class PowderLevelGrpcService:
             )
 
         self._logger = logger
-        self._image_device = ImageStreamDeviceClass(
+        self._image_device = ImageStream(
             camera_id=camera_id,
             topic_name=image_topic,
             interval_sec=image_interval_sec,

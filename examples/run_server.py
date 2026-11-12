@@ -1,5 +1,7 @@
+#!/usr/bin/env python
+"""粉面監視用gRPCサーバーを起動し、単一の制御対象を公開する。
 
-"""粉体レベル監視用 gRPC サーバーを起動する。"""
+カメラ接続と測定制御はPowderLevelGrpcServiceに集約する。ローカル単体テストでは使用しない。"""
 from grpc_frame.event_bus import EventBus
 from grpc_frame.grpc_server import create_grpc_server
 from x_logger import XLogger

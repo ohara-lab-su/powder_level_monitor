@@ -1,5 +1,9 @@
-#!/usr/bin/env python3
+#!/usr/bin/env python
 # -*- coding: utf-8 -*-
+
+"""gRPCサーバーに粉面測定の停止を指示する。
+
+サーバーやカメラを停止する操作ではなく、測定処理の停止指示である。"""
 
 from powder_level_monitor.server_grpc import PowderLevelGrpcClient
 from x_logger import XLogger

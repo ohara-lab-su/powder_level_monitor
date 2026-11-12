@@ -1,5 +1,9 @@
-#!/usr/bin/env python3
+#!/usr/bin/env python
 # -*- coding: utf-8 -*-
+
+"""現在検出されている粉面位置をBaselineとしてgRPCサーバーに設定する。
+
+ROIを設定し、粉面検出が成功している状態で実行する。失敗時は測定結果のエラーを表示する。"""
 
 from powder_level_monitor.server_grpc import PowderLevelGrpcClient
 from x_logger import XLogger
