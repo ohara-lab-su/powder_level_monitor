@@ -127,3 +127,20 @@ Python 3.10以上、OpenCV、NumPy。カメラ制御・ロギングに既存の 
 0.0.x系と0.1.x系の `PowderControlDeviceClass` の公開メソッド名17件をソース上で照合し、一致することを確認した。また、両版の `PowderLevelGrpcService` の公開メソッドは同一であり、変更点は内部で使用する画像取得クラスのimportと生成に限られる。`PowderLevelGrpcClient` のコンストラクタも同一である。このため、これらのサンプルが利用する**公開APIについてはソース上の互換性がある**。ただし、`grpc_frame` を通した実通信・画像イベント購読・実カメラ動作は未検証であり、動作保証とは区別する。
 
 各ファイルの先頭Docstringにも用途と前提条件を記載した。
+
+
+## ローカルGUIによる粉面検出テスト
+
+Webカメラを接続したPCで、gRPCサーバーを起動せずに以下を実行する。
+
+```bash
+uv run python examples/monitor_gui_local.py
+```
+
+`monitor_gui_local.py` は `PowderControlDeviceClass` を直接生成し、内部の `ImageStream` から最新画像を取得する。既存の `powder_monitor_ctrl.py` の `__main__` テストは変更せず、引き続き利用できる。
+
+画面の「ROI設定開始」を押し、画像上で四隅を4点クリックして「ROI登録」を押す。ROIを登録すると以前のBaselineは無効になる。粉面の検出線が表示されたら「Baseline設定」を押し、「測定開始」で粉面位置とBaselineからの変化量を追跡する。「測定停止」は測定を停止し、ウィンドウを閉じるとカメラ接続を解放する。
+
+画像上の緑線は登録ROI、黄線は編集中ROI、赤線はBaseline、青線は現在の粉面検出線を表す（OpenCVのBGR指定）。検出結果、状態、変化量（px/mm/%）およびエラーをGUIに表示する。mm換算は制御クラスのパラメータ設定に依存する。
+
+`examples/monitor_gui.py` は従来どおりgRPC接続用であり、ローカルGUIとは別ファイルとして維持する。

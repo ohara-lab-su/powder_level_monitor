@@ -89,3 +89,9 @@
 - English at `/` and `/en/`, Japanese at `/ja/`, including language badges, tutorials and generated API reference.
 - Adapted the existing `pages.yml` to call the shared bilingual build script; deployment remains on `main` and publishes `docs/_build/html`.
 - No measurement, detection, controller or gRPC implementation was modified by this documentation update.
+
+
+### ローカルGUIの追加（0.1.0、バージョン変更なし）
+
+- `examples/monitor_gui_local.py` を追加。gRPCを使用せずにカメラ表示、ROI登録、Baseline設定、測定開始・停止、粉面検出線と変化量の表示を行う。
+- 既存のgRPC用GUIおよび制御クラスの `__main__` は変更しない。
